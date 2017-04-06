@@ -12,7 +12,7 @@
 
 // MATERIAL DEFINES
 #define SPHERE_MATL 1.0
-#define PLANE_MATL  2.0
+#define FLOOR_MATL  2.0
 #define COLS        3
 #define ROWS        3
 
@@ -27,7 +27,7 @@ struct Surface {
     float roughness;
     float specular;
     float metallic;
-    float selfShadow;
+    float shadow;
 };
 
 struct Brdf {
@@ -76,14 +76,13 @@ struct Flags {
 };
 
 // GLOBALS
-Flags flags = Flags(false, false, false, true); // environment, 
+Flags flags = Flags(false, false, false, true); // environment, occlusions, shadows, post, 
 Global global = Global(Camera(vec3(0.0), vec3(0.0)), Light(vec3(0.5, 0.5, 0.0), vec3(1.0)), 0.0, vec4(0.0));
 
 // UTILITIES
 vec3 mergeobjs(vec3 a, vec3 b) { 
     return mix(b, a, step(a.x, b.x)); 
 }
-
 float uniondf(float a, float b) { 
     return min(a, b); 
 }
@@ -93,11 +92,9 @@ float intersdf(float a, float b) {
 float diffdf(float a, float b) { 
     return max(a, -b); 
 }
-
 bool inbounds(vec3 p, vec3 bounds) {
     return all(lessThanEqual(abs(p), 0.5 * bounds));
 }
-
 // XXX: To get around a case where a number very close to zero can result in 
 // eradic behavior with sign, we assume a positive sign when a value is 
 // close to 0.0
@@ -151,33 +148,32 @@ float intersectBox(vec3 ro, vec3 rd, vec3 bounds) {
 }
 
 // DISTANCE FIELDS
-float spheredf(vec3 pos, float r) {
-    return length(pos) - r;
+float getSphere(vec3 point, float radius) {
+    return length(point) - radius;
 }
-
-float planedf(vec3 pos, float yoffset) {
-    return abs(pos.y + yoffset);
+float getFloor(vec3 point, float y) {
+    return abs(point.y + y);
 }
 // SCENE MARCHING
-vec3 ballsobj(vec3 p, float r) {    
+vec3 getSphereObj(vec3 point, float radius) {    
     // XXX: could use some optimization
-    vec3 obj = vec3(BIG_FLOAT, SPHERE_MATL, 0.0);
+    vec3 position = vec3(BIG_FLOAT, SPHERE_MATL, 0.0);
     for (int j = 0; j < ROWS; j++) {
-        float xoff = float(ROWS) * 2.1 * r * (float(j) / float(ROWS - 1) - 0.5);
+        float x = float(ROWS) * 2.1 * radius * (float(j) / float(ROWS - 1) - 0.5);
         for (int i = 0; i < COLS; i++) {
-            float zoff = float(COLS) * 2.1 * r * (float(i) / float(COLS - 1) - 0.5);
-            float t = spheredf(p - vec3(xoff, 0.0, zoff), r);
-            obj.z = mix(obj.z, float(i + j * COLS), step(t, obj.x));
-            obj.x = min(obj.x, t);
+            float z = float(COLS) * 2.1 * radius * (float(i) / float(COLS - 1) - 0.5);
+            float sphere = getSphere(point - vec3(x, 0.0, z), radius);
+            position.z = mix(position.z, float(i + j * COLS), step(sphere, position.x));
+            position.x = min(position.x, sphere);
         }
     }    
-    return obj;
+    return position;
 }
-vec3 planeobj(vec3 p, float yoffset) {
-    return vec3(planedf(p, yoffset), PLANE_MATL, 1.0);
+vec3 getFloorObj(vec3 point, float y) {
+    return vec3(getFloor(point, y), FLOOR_MATL, 1.0);
 }
-vec3 scenedf(vec3 pos, vec3 rd) {
-    vec3 obj = vec3(100.0, -1.0, -1.0);
+vec3 getDistanceField(vec3 point, vec3 rd) {
+    vec3 position = vec3(100.0, -1.0, -1.0);
     float r = 0.5;
     float tbox = 0.0;
     if (dot(abs(rd), vec3(1.0)) > EPSILON) {
@@ -187,18 +183,18 @@ vec3 scenedf(vec3 pos, vec3 rd) {
         // Add a buffer to the bounding box to account for the 
         // ambient occlusion marching.
         bounds += occlusionBuffer;    
-        tbox = intersectBox(pos, rd, bounds);
+        tbox = intersectBox(point, rd, bounds);
     }    
     if (tbox < 10.0) {
-        vec3 bobj = ballsobj(pos + rd * tbox, r);
+        vec3 sphere = getSphereObj(point + rd * tbox, r);
         // Add the distance to the bounding box
-        bobj.x += tbox;
-        obj = mergeobjs(obj, bobj);
+        sphere.x += tbox;
+        position = mergeobjs(position, sphere);
     }    
-    // vec3 bobj = ballsobj(pos, r);
-    // obj = mergeobjs(obj, bobj);
-    obj = mergeobjs(obj, planeobj(pos, 0.5));
-    return obj;
+    // vec3 sphere = getSphereObj(pos, r);
+    // position = mergeobjs(position, sphere);
+    position = mergeobjs(position, getFloorObj(point, 0.5));
+    return position;
 }
 
 // DIST MARCH
@@ -213,7 +209,7 @@ vec3 getDistanceMarch(vec3 ro, vec3 rd, float maxd) {
         }
         // advance the distance of the last lookup
         res.x += dist;
-        vec3 dfresult = scenedf(ro + res.x * rd, rd);
+        vec3 dfresult = getDistanceField(ro + res.x * rd, rd);
         dist = dfresult.x;
         res.yz = dfresult.yz;
     }
@@ -231,7 +227,7 @@ float getSoftShadowStrength(vec3 ro, vec3 rd, float mint, float maxt, float k) {
     float t = mint;
     for (int i = 0; i < SS_STEPS; i++) {
         if (t < maxt) {
-            float h = scenedf(ro + rd * t, rd).x;
+            float h = getDistanceField(ro + rd * t, rd).x;
             shadow = min(shadow, k * h / t);
             t += SS_SIZE;
         }
@@ -243,28 +239,28 @@ float getSoftShadowStrength(vec3 ro, vec3 rd, float mint, float maxt, float k) {
 #define AO_STEPS 5
 #define AO_SIZE 0.14
 #define AO_SCALE 0.35
-float getOcclusionStrength(vec3 p, vec3 n) {
+float getOcclusionStrength(vec3 point, vec3 normal) {
     float occlusion = 0.0;
     float scale = 1.0;
     for (int i = 0; i < AO_STEPS; i++) {
         float step = 0.01 + AO_SIZE * float(i);
-        vec3 p = n * step + p;        
-        float d = scenedf(p, n).x;
-        occlusion += -(d - step) * scale;
+        vec3 point = normal * step + point;
+        float factor = getDistanceField(point, normal).x;
+        occlusion += -(factor - step) * scale;
         scale *= AO_SCALE;
     }    
     return clamp(occlusion, 0.0, 1.0);
 }
 
 // SHADING
-void setMaterial(float matid, float surfaceid, inout Surface surface) {
-    if (matid - 0.5 < SPHERE_MATL) { 
+void setMaterial(float materialId, float surfaceId, inout Surface surface) {
+    if (materialId - 0.5 < SPHERE_MATL) { 
         surface.color = vec3(1.0, 0.35, 0.5); 
-        float ballrow = floor(surfaceid / float(COLS));
-        surface.roughness = mod(surfaceid, float(COLS)) / float(COLS - 1);
-        surface.metallic = floor(surfaceid / float(COLS)) / float(ROWS - 1);
+        float ballrow = floor(surfaceId / float(COLS));
+        surface.roughness = mod(surfaceId, float(COLS)) / float(COLS - 1);
+        surface.metallic = floor(surfaceId / float(COLS)) / float(ROWS - 1);
         surface.specular = 0.8;
-    } else if (matid - 0.5 < PLANE_MATL) {
+    } else if (materialId - 0.5 < FLOOR_MATL) {
         vec4 pavem = texture2D(iChannel2, 0.1 * surface.point.xz);
         surface.color = vec3(.1 * smoothstep(0.6, 0.3, pavem.r));
         surface.metallic = 0.0;
@@ -272,7 +268,7 @@ void setMaterial(float matid, float surfaceid, inout Surface surface) {
         surface.specular = 0.02; // .05        
         surface.normal.xz += 0.1 * pavem.bg;
         surface.normal = normalize(surface.normal);
-        surface.selfShadow = 0.3 * (1.0 - smoothstep(0.4, 0.8, pavem.g));
+        surface.shadow = 0.3 * (1.0 - smoothstep(0.4, 0.8, pavem.g));
     }
 }
 
@@ -293,26 +289,26 @@ float getDistributionStrength(Brdf brdf, float roughness) {
 
 float getGeometryStrength(Brdf brdf, float roughness) {    
     // G(h,l,v) factor    
-    float k = roughness / 2.0;
-    float Gv = step(0.0, brdf.costv) * (brdf.costv / (brdf.costv * (1.0 - k) + k));
-    float Gl = step(0.0, brdf.costl) * (brdf.costl / (brdf.costl * (1.0 - k) + k));
-    float geometry = Gl * Gv;
+    float factor = roughness / 2.0;
+    float view = step(0.0, brdf.costv) * (brdf.costv / (brdf.costv * (1.0 - factor) + factor));
+    float light = step(0.0, brdf.costl) * (brdf.costl / (brdf.costl * (1.0 - factor) + factor));
+    float geometry = light * view;
     return geometry;
 }
 
-float pow5(float v){
-    float tmp = v * v;
-    return tmp * tmp * v;
+float pow5(float value){
+    float temp = value * value;
+    return temp * temp * value;
 }
 vec3 getFresnelColor(Brdf brdf, Surface surface) {
     // F(h,l) factor
-    vec3 F0 = surface.specular * mix(vec3(1.0), surface.color, surface.metallic);    
+    vec3 fresnel = surface.specular * mix(vec3(1.0), surface.color, surface.metallic);    
 #if FRESNEL_HORNER_APPROXIMATION
-    vec3 F = F0 + (1.0 - F0) * exp2((-5.55473 * brdf.costd - 6.98316) * brdf.costd); 
+    fresnel = fresnel + (1.0 - fresnel) * exp2((-5.55473 * brdf.costd - 6.98316) * brdf.costd); 
 #else
-    vec3 F = F0 + (1.0 - F0) * pow5(1.0 - brdf.costd); 
+    fresnel = fresnel + (1.0 - fresnel) * pow5(1.0 - brdf.costd); 
 #endif    
-    return F;    
+    return fresnel;    
 }
 /*
 vec3 getDirectColor(Brdf brdf, Surface surface) {        
@@ -335,9 +331,9 @@ Brdf getBrdf(Surface surface, vec3 direction) {
 
 vec3 getEnvironmentLight(Surface surface, vec3 direction, vec3 color) {
     Brdf brdf = getBrdf(surface, direction);
-    float ndl = clamp(brdf.costl, 0.0, 1.0);    
+    float costl = clamp(brdf.costl, 0.0, 1.0);    
     vec3 rgb = vec3(0.0);
-    if (ndl > 0.0) {
+    if (costl > 0.0) {
         // float distribution = getDistributionStrength(brdf, surface.roughness);
         float geometry = getGeometryStrength(brdf, surface.roughness);
         vec3 fresnel = getFresnelColor(brdf, surface);
@@ -346,7 +342,7 @@ vec3 getEnvironmentLight(Surface surface, vec3 direction, vec3 color) {
         vec3 specular = color * geometry * fresnel * brdf.costd / (brdf.costh * brdf.costv);       
         float shadow = 1.0;
         if (flags.shadows) { 
-            shadow = min(1.0 - surface.selfShadow, getSoftShadowStrength(surface.point, direction, 0.02, 20.0, 7.));        
+            shadow = min(1.0 - surface.shadow, getSoftShadowStrength(surface.point, direction, 0.02, 20.0, 7.));        
         }
         rgb = specular * shadow * color;
     }
@@ -380,7 +376,7 @@ vec3 getLightColor(Surface surface, vec3 direction, vec3 color) {
         vec3 specular = distribution * fresnel * geometry / (4. * brdf.costl * brdf.costv);        
         float shadow = 1.0;
         if (flags.shadows) {
-            shadow = min(1.0 - surface.selfShadow, getSoftShadowStrength(surface.point, direction, 0.1, 20.0, 5.));
+            shadow = min(1.0 - surface.shadow, getSoftShadowStrength(surface.point, direction, 0.1, 20.0, 5.));
         }
         // vec3 diff = getDirectColor(brdf, surface);
         // rgb += diff * costl * shadow * color;
@@ -391,9 +387,8 @@ vec3 getLightColor(Surface surface, vec3 direction, vec3 color) {
 
 vec3 getSurfaceColor(Surface surface) {    
     vec3 ambient = surface.color * .02;
-    // ambient occlusion is amount of occlusion.  So 1 is fully occluded
-    // and 0 is not occluded at all.  Makes math easier when mixing 
-    // shadowing effects.
+    // ambient occlusion is amount of occlusion. So 1 is fully occluded
+    // and 0 is not occluded at all. Makes math easier when mixing shadowing effects.
     float occlusion = 0.0;
     if (flags.occlusions) {
         occlusion = getOcclusionStrength(surface.point, surface.normal);
@@ -412,9 +407,9 @@ vec3 getNormal(vec3 p) {
     vec3 epsilon = vec3(0.001, 0.0, 0.0);
     vec3 z = vec3(0.0);
     vec3 n = vec3(
-        scenedf(p + epsilon.xyy, z).x - scenedf(p - epsilon.xyy, z).x,
-        scenedf(p + epsilon.yxy, z).x - scenedf(p - epsilon.yxy, z).x,
-        scenedf(p + epsilon.yyx, z).x - scenedf(p - epsilon.yyx, z).x
+        getDistanceField(p + epsilon.xyy, z).x - getDistanceField(p - epsilon.xyy, z).x,
+        getDistanceField(p + epsilon.yxy, z).x - getDistanceField(p - epsilon.yxy, z).x,
+        getDistanceField(p + epsilon.yyx, z).x - getDistanceField(p - epsilon.yyx, z).x
     );
     return normalize(n);
 }
