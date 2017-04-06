@@ -19,39 +19,67 @@
 // SWITCHES
 #define FRESNEL_HORNER_APPROXIMATION 1
 
+// STRUCTS
+struct Surface {
+    vec3 point;
+    vec3 normal;
+    vec3 color;
+    float roughness;
+    float specular;
+    float metallic;
+    float selfShadow;
+};
+
+struct Brdf {
+    // viewDir is the view direction vector
+    vec3 viewDir;
+    // The half vector of a microfacet model 
+    vec3 halfDir;
+    // cos(theta_h) - theta_h is angle between half vector and normal
+    float costh; 
+    // cos(theta_d) - theta_d is angle between half vector and light dir / view dir
+    float costd;      
+    // cos(theta_l) - theta_l is angle between the light vector and normal
+    float costl;
+    // cos(theta_v) - theta_v is angle between the viewing vector and normal
+    float costv;
+};
+
+struct CameraData {
+    vec3 position;
+    vec3 direction;
+    vec2 st;
+};
+
+struct Camera {
+    vec3 position;
+    vec3 target;
+};
+
+struct Light {
+    vec3 direction;
+    vec3 color;
+};
+
+struct Global {
+    Camera camera;
+    Light light;
+    float time;
+    vec4 debug;    
+};
+
+struct Flags {
+    bool environment;
+    bool occlusions;
+    bool shadows;
+    bool post;
+};
+
 // GLOBALS
-vec3  g_camPointAt   = vec3(0.0);
-vec3  g_camOrigin    = vec3(0.0);
-float g_time         = 0.0;
-vec3  g_ldir         = vec3(0.5, 0.5, 0.0);
-float g_lillum       = 1.0;
-vec4  g_debugcolor   = vec4(0.0);
+Flags flags = Flags(false, false, false, true); // environment, 
+Global global = Global(Camera(vec3(0.0), vec3(0.0)), Light(vec3(0.5, 0.5, 0.0), vec3(1.0)), 0.0, vec4(0.0));
 
 // UTILITIES
-// XXX: To get around a case where a number very close to zero can result in 
-// eradic behavior with sign, we assume a positive sign when a value is 
-// close to 0.0
-float zeroTolerantSign(float value) {
-    float s = 1.0;
-    if (abs(value) > EPSILON) {
-        s = sign(value);
-    }
-    return s;   
-}
-
-mat3 rotMatAroundYAxis(float c, float s) {
-    return mat3(c, 0.0, s , 0.0, 1.0, 0.0, -s, 0.0, c);
-}
-
-mat3 rotMatAroundXAxis(float c, float s) {
-    return mat3(1.0, 0.0, 0.0, 0.0, c, s, 0.0, -s, c);
-}
-
-float pow5(float v){
-    float tmp = v * v;
-    return tmp * tmp * v;
-}
-
 vec3 mergeobjs(vec3 a, vec3 b) { 
     return mix(b, a, step(a.x, b.x)); 
 }
@@ -70,9 +98,19 @@ bool inbounds(vec3 p, vec3 bounds) {
     return all(lessThanEqual(abs(p), 0.5 * bounds));
 }
 
+// XXX: To get around a case where a number very close to zero can result in 
+// eradic behavior with sign, we assume a positive sign when a value is 
+// close to 0.0
+float zeroTolerantSign(float value) {
+    float s = 1.0;
+    if (abs(value) > EPSILON) {
+        s = sign(value);
+    }
+    return s;   
+}
 // Returns a vec2 where:
 //   result.x = 1.0 or 0.0 if there is a hit
-//   result.y = t such that origin + t * dir = hit point
+//   result.y = t such that position + t * dir = hit point
 vec2 intersectDSPlane(vec3 o, vec3 dir, vec3 pn, vec3 po) {
     float dirDotN = dot(dir, pn);
     // if the ray direction is parallel to the plane, let's just treat the 
@@ -82,7 +120,6 @@ vec2 intersectDSPlane(vec3 o, vec3 dir, vec3 pn, vec3 po) {
     float t = min(BIG_FLOAT, -dot(pn, (o - po)) / denom);    
     return vec2(step(EPSILON, t), t);
 }
-
 // Returns the ray intersection distance (assumes rd is normalized) to the 
 // box.  If the ray originates inside the box, then a t of zero is returned.
 // if no intersection takes place, BIG_FLOAT is returned.
@@ -97,15 +134,15 @@ float intersectBox(vec3 ro, vec3 rd, vec3 bounds) {
         // opposing the ray direction.  Saves us from testing the other 3 
         // walls.  We get away with this since we already handled the case 
         // where the ray originates in the box.
-        vec2 rx = intersectDSPlane(ro, rd, vec3( -srd.x, 0.0, 0.0), vec3(0.5 * bounds.x *  -srd.x, 0.0, 0.0));
+        vec2 rx = intersectDSPlane(ro, rd, vec3( -srd.x, 0.0, 0.0), vec3(0.5 * bounds.x * -srd.x, 0.0, 0.0));
         if (rx.x > 0.5 && inbounds(ro + rd * (rx.y + EPSILON), bounds)) {
             d = min(d, rx.y);
         }
-        vec2 ry = intersectDSPlane(ro, rd, vec3(0.0, -srd.y, 0.0), vec3(0.0, 0.5 * bounds.y *  -srd.y, 0.0));
+        vec2 ry = intersectDSPlane(ro, rd, vec3(0.0, -srd.y, 0.0), vec3(0.0, 0.5 * bounds.y * -srd.y, 0.0));
         if (ry.x > 0.5 && inbounds(ro + rd * (ry.y + EPSILON), bounds)) {
             d = min(d, ry.y);
         }
-        vec2 rz = intersectDSPlane(ro, rd, vec3(0.0, 0.0, -srd.z), vec3(0.0, 0.0, 0.5 * bounds.z *  -srd.z));
+        vec2 rz = intersectDSPlane(ro, rd, vec3(0.0, 0.0, -srd.z), vec3(0.0, 0.0, 0.5 * bounds.z * -srd.z));
         if (rz.x > 0.5 && inbounds(ro + rd * (rz.y + EPSILON), bounds)) {
             d = min(d, rz.y);
         }
@@ -121,7 +158,6 @@ float spheredf(vec3 pos, float r) {
 float planedf(vec3 pos, float yoffset) {
     return abs(pos.y + yoffset);
 }
-
 // SCENE MARCHING
 vec3 ballsobj(vec3 p, float r) {    
     // XXX: could use some optimization
@@ -137,28 +173,26 @@ vec3 ballsobj(vec3 p, float r) {
     }    
     return obj;
 }
-
 vec3 planeobj(vec3 p, float yoffset) {
     return vec3(planedf(p, yoffset), PLANE_MATL, 1.0);
 }
-
 vec3 scenedf(vec3 pos, vec3 rd) {
     vec3 obj = vec3(100.0, -1.0, -1.0);
     float r = 0.5;
     float tbox = 0.0;
     if (dot(abs(rd), vec3(1.0)) > EPSILON) {
         float rbuffer = 2.1 * r;
-        float aobuffer = 1.0;
+        float occlusionBuffer = 1.0;
         vec3 bounds = rbuffer * vec3(float(ROWS + 1), 1.0, float(COLS + 1));
         // Add a buffer to the bounding box to account for the 
         // ambient occlusion marching.
-        bounds  += aobuffer;    
+        bounds += occlusionBuffer;    
         tbox = intersectBox(pos, rd, bounds);
     }    
     if (tbox < 10.0) {
         vec3 bobj = ballsobj(pos + rd * tbox, r);
         // Add the distance to the bounding box
-        bobj.x  += tbox;
+        bobj.x += tbox;
         obj = mergeobjs(obj, bobj);
     }    
     // vec3 bobj = ballsobj(pos, r);
@@ -168,12 +202,12 @@ vec3 scenedf(vec3 pos, vec3 rd) {
 }
 
 // DIST MARCH
-#define DISTMARCH_STEPS 60
-#define DISTMARCH_MAXDIST 50.0
-vec3 distmarch(vec3 ro, vec3 rd, float maxd) {
+#define DM_STEPS 60
+#define DM_MAX 50.0
+vec3 getDistanceMarch(vec3 ro, vec3 rd, float maxd) {
     float dist = 0.01;
     vec3 res = vec3(0.0, -1.0, -1.0);
-    for (int i=0; i < DISTMARCH_STEPS; i++) {
+    for (int i=0; i < DM_STEPS; i++) {
         if (abs(dist) < EPSILON || res.x > maxd) {
             continue;
         }
@@ -189,76 +223,192 @@ vec3 distmarch(vec3 ro, vec3 rd, float maxd) {
     return res;
 }
 
-// SHADOWING & NORMALS
-#define SOFTSHADOW_STEPS 40
-#define SOFTSHADOW_STEPSIZE 0.1
-float calcSoftShadow(vec3 ro, vec3 rd, float mint, float maxt, float k) {
+// SOFT SHADOWS
+#define SS_STEPS 40
+#define SS_SIZE 0.1
+float getSoftShadowStrength(vec3 ro, vec3 rd, float mint, float maxt, float k) {
     float shadow = 1.0;
     float t = mint;
-    for (int i=0; i < SOFTSHADOW_STEPS; i++) {
+    for (int i = 0; i < SS_STEPS; i++) {
         if (t < maxt) {
             float h = scenedf(ro + rd * t, rd).x;
             shadow = min(shadow, k * h / t);
-            t  += SOFTSHADOW_STEPSIZE;
+            t += SS_SIZE;
         }
     }
     return clamp(shadow, 0.00, 1.0);
 }
 
 // AMBIENT OCCLUSION
-#define AO_NUMSAMPLES 5
-#define AO_STEPSIZE 0.14
-#define AO_STEPSCALE 0.35
-float calcAO(vec3 p, vec3 n) {
-    float ao = 0.0;
-    float aoscale = 1.0;
-    for (int aoi=0; aoi< AO_NUMSAMPLES ; aoi++) {
-        float step = 0.01 + AO_STEPSIZE * float(aoi);
-        vec3 aop =  n * step + p;        
-        float d = scenedf(aop, n).x;
-        ao += -(d - step) * aoscale;
-        aoscale *= AO_STEPSCALE;
+#define AO_STEPS 5
+#define AO_SIZE 0.14
+#define AO_SCALE 0.35
+float getOcclusionStrength(vec3 p, vec3 n) {
+    float occlusion = 0.0;
+    float scale = 1.0;
+    for (int i = 0; i < AO_STEPS; i++) {
+        float step = 0.01 + AO_SIZE * float(i);
+        vec3 p = n * step + p;        
+        float d = scenedf(p, n).x;
+        occlusion += -(d - step) * scale;
+        scale *= AO_SCALE;
     }    
-    return clamp(ao, 0.0, 1.0);
+    return clamp(occlusion, 0.0, 1.0);
 }
 
 // SHADING
-struct SurfaceData {
-    vec3 point;
-    vec3 normal;
-    vec3 basecolor;
-    float roughness;
-    float specular;
-    float metallic;
-    float selfshad;
-};
-
-struct BRDFVars {
-    // vdir is the view direction vector
-    vec3 vdir;
-    // The half vector of a microfacet model 
-    vec3 hdir;
-    // cos(theta_h) - theta_h is angle between half vector and normal
-    float costh; 
-    // cos(theta_d) - theta_d is angle between half vector and light dir / view dir
-    float costd;      
-    // cos(theta_l) - theta_l is angle between the light vector and normal
-    float costl;
-    // cos(theta_v) - theta_v is angle between the viewing vector and normal
-    float costv;
-};
-
-BRDFVars calcBRDFVars(SurfaceData surf, vec3 ldir) {
-    vec3 vdir = normalize(g_camOrigin - surf.point);
-    vec3 hdir = normalize(ldir + vdir);
-    float costh = dot(surf.normal, hdir); 
-    float costd = dot(ldir, hdir);      
-    float costl = dot(surf.normal, ldir);
-    float costv = dot(surf.normal, vdir);
-    return BRDFVars(vdir, hdir, costh, costd, costl, costv);
+void setMaterial(float matid, float surfaceid, inout Surface surface) {
+    if (matid - 0.5 < SPHERE_MATL) { 
+        surface.color = vec3(1.0, 0.35, 0.5); 
+        float ballrow = floor(surfaceid / float(COLS));
+        surface.roughness = mod(surfaceid, float(COLS)) / float(COLS - 1);
+        surface.metallic = floor(surfaceid / float(COLS)) / float(ROWS - 1);
+        surface.specular = 0.8;
+    } else if (matid - 0.5 < PLANE_MATL) {
+        vec4 pavem = texture2D(iChannel2, 0.1 * surface.point.xz);
+        surface.color = vec3(.1 * smoothstep(0.6, 0.3, pavem.r));
+        surface.metallic = 0.0;
+        surface.roughness = 0.6;
+        surface.specular = 0.02; // .05        
+        surface.normal.xz += 0.1 * pavem.bg;
+        surface.normal = normalize(surface.normal);
+        surface.selfShadow = 0.3 * (1.0 - smoothstep(0.4, 0.8, pavem.g));
+    }
 }
 
-vec3 calcNormal(vec3 p) {
+float getDistributionStrength(Brdf brdf, float roughness) {
+    // D(h) factor
+    // using the GGX approximation where the gamma factor is 2.0
+    // Clamping roughness so that a directional light has a specular
+    // response. A roughness of perfectly 0 will create light singularities.
+    float alpha = roughness * roughness;
+    float denom = brdf.costh * brdf.costh * (alpha * alpha - 1.0) + 1.0;
+    float distribution = (alpha * alpha) / (PI * denom * denom); 
+    // using the GTR approximation where the gamma factor is generalized
+    // float gamma = 1.0;
+    // float sinth = length(cross(surface.normal, brdf.halfDir));
+    // float distribution = 1.0 / pow(alpha * alpha * brdf.costh * brdf.costh + sinth * sinth, gamma);
+    return distribution;
+}
+
+float getGeometryStrength(Brdf brdf, float roughness) {    
+    // G(h,l,v) factor    
+    float k = roughness / 2.0;
+    float Gv = step(0.0, brdf.costv) * (brdf.costv / (brdf.costv * (1.0 - k) + k));
+    float Gl = step(0.0, brdf.costl) * (brdf.costl / (brdf.costl * (1.0 - k) + k));
+    float geometry = Gl * Gv;
+    return geometry;
+}
+
+float pow5(float v){
+    float tmp = v * v;
+    return tmp * tmp * v;
+}
+vec3 getFresnelColor(Brdf brdf, Surface surface) {
+    // F(h,l) factor
+    vec3 F0 = surface.specular * mix(vec3(1.0), surface.color, surface.metallic);    
+#if FRESNEL_HORNER_APPROXIMATION
+    vec3 F = F0 + (1.0 - F0) * exp2((-5.55473 * brdf.costd - 6.98316) * brdf.costd); 
+#else
+    vec3 F = F0 + (1.0 - F0) * pow5(1.0 - brdf.costd); 
+#endif    
+    return F;    
+}
+/*
+vec3 getDirectColor(Brdf brdf, Surface surface) {        
+    float frk = 0.5 + 2.0 * brdf.costd * brdf.costd * surface.roughness;        
+    vec3 rgb =  surface.color * ONE_OVER_PI * (1.0 + (frk - 1.0) * pow5(1.0 - brdf.costl)) * (1.0 + (frk - 1.0) * pow5(1.0 - brdf.costv));
+    // vec3 rgb = surface.color * ONE_OVER_PI; // lambert
+    return rgb;
+}
+*/
+
+Brdf getBrdf(Surface surface, vec3 direction) {
+    vec3 viewDir = normalize(global.camera.position - surface.point);
+    vec3 halfDir = normalize(direction + viewDir);
+    float costh = dot(surface.normal, halfDir); 
+    float costd = dot(direction, halfDir);      
+    float costl = dot(surface.normal, direction);
+    float costv = dot(surface.normal, viewDir);
+    return Brdf(viewDir, halfDir, costh, costd, costl, costv);
+}
+
+vec3 getEnvironmentLight(Surface surface, vec3 direction, vec3 color) {
+    Brdf brdf = getBrdf(surface, direction);
+    float ndl = clamp(brdf.costl, 0.0, 1.0);    
+    vec3 rgb = vec3(0.0);
+    if (ndl > 0.0) {
+        // float distribution = getDistributionStrength(brdf, surface.roughness);
+        float geometry = getGeometryStrength(brdf, surface.roughness);
+        vec3 fresnel = getFresnelColor(brdf, surface);
+        // Combines the BRDF as well as the pdf of this particular
+        // sample direction.
+        vec3 specular = color * geometry * fresnel * brdf.costd / (brdf.costh * brdf.costv);       
+        float shadow = 1.0;
+        if (flags.shadows) { 
+            shadow = min(1.0 - surface.selfShadow, getSoftShadowStrength(surface.point, direction, 0.02, 20.0, 7.));        
+        }
+        rgb = specular * shadow * color;
+    }
+    return rgb;
+}
+
+vec3 getEnvironmentColor(Surface surface, vec3 tint) {
+    vec3 viewDir = normalize(surface.point - global.camera.position);    
+    vec3 envDir = reflect(viewDir, surface.normal);
+    // This is pretty hacky for a microfacet model. We are only
+    // sampling the environment in one direction when we should be
+    // using many samples and weight them based on their distribution.
+    // So to compensate for the hack, I blend towards the blurred version
+    // of the cube map as roughness goes up and decrease the light
+    // contribution as roughness goes up.
+    vec4 specular = .4 * mix(texture2D(iChannel0, envDir.xy), texture2D(iChannel1, envDir.xy), surface.roughness) * (1.0 - surface.roughness);    
+    vec3 rgb = getEnvironmentLight(surface, envDir, tint * specular.rgb);
+    return rgb;
+}
+
+vec3 getLightColor(Surface surface, vec3 direction, vec3 color) {
+    Brdf brdf = getBrdf(surface, direction);
+    vec3 rgb = vec3(0.0);
+    float costl = clamp(brdf.costl, 0.0, 1.0);
+    if (costl > 0.0) {
+        // remap hotness of roughness for analytic lights
+        float roughness = max(0.05, surface.roughness);
+        float distribution = getDistributionStrength(brdf, roughness);
+        float geometry = getGeometryStrength(brdf, (roughness + 1.0) * 0.5);
+        vec3 fresnel = getFresnelColor(brdf, surface);
+        vec3 specular = distribution * fresnel * geometry / (4. * brdf.costl * brdf.costv);        
+        float shadow = 1.0;
+        if (flags.shadows) {
+            shadow = min(1.0 - surface.selfShadow, getSoftShadowStrength(surface.point, direction, 0.1, 20.0, 5.));
+        }
+        // vec3 diff = getDirectColor(brdf, surface);
+        // rgb += diff * costl * shadow * color;
+        rgb += specular * costl * shadow * color;
+    }
+    return rgb;
+}
+
+vec3 getSurfaceColor(Surface surface) {    
+    vec3 ambient = surface.color * .02;
+    // ambient occlusion is amount of occlusion.  So 1 is fully occluded
+    // and 0 is not occluded at all.  Makes math easier when mixing 
+    // shadowing effects.
+    float occlusion = 0.0;
+    if (flags.occlusions) {
+        occlusion = getOcclusionStrength(surface.point, surface.normal);
+    }
+    vec3 rgb = getLightColor(surface, global.light.direction, global.light.color);
+    if (flags.environment) {
+        rgb += getEnvironmentColor(surface, global.light.color) * (1.0 - 3.5 * occlusion);
+    }
+    rgb += ambient * (1.0 - 3.5 * occlusion);
+    return rgb;
+}
+
+// SCENE
+#define GET_SURFACE(p, n) Surface(p, n, vec3(0.0), 0.0, 1.0, 0.0, 0.0)
+vec3 getNormal(vec3 p) {
     vec3 epsilon = vec3(0.001, 0.0, 0.0);
     vec3 z = vec3(0.0);
     vec3 n = vec3(
@@ -268,165 +418,39 @@ vec3 calcNormal(vec3 p) {
     );
     return normalize(n);
 }
-
-void material(float matid, float surfid, inout SurfaceData surf) {
-    vec3 surfcol = vec3(1.0);
-    if (matid - 0.5 < SPHERE_MATL) { 
-        surf.basecolor = vec3(1.0, 0.35, 0.5); 
-        float ballrow = floor(surfid / float(COLS));
-        surf.roughness = mod(surfid, float(COLS)) / float(COLS - 1);
-        surf.metallic = floor(surfid / float(COLS)) / float(ROWS - 1);
-        surf.specular = 0.8;
-    } else if (matid - 0.5 < PLANE_MATL) {
-        vec4 pavem = texture2D(iChannel2, 0.1 * surf.point.xz);
-        surf.basecolor = vec3(.1 * smoothstep(0.6, 0.3, pavem.r));
-        surf.metallic = 0.0;
-        surf.roughness = 0.6;
-        surf.specular = 0.02; // .05        
-        surf.normal.xz  += 0.1 * pavem.bg;
-        surf.normal = normalize(surf.normal);
-        surf.selfshad = 0.3 * (1.0 - smoothstep(0.4, 0.8, pavem.g));
-    }
+// ANIMATION
+mat3 rotationAroundYAxis(float c, float s) {
+    return mat3(c, 0.0, s , 0.0, 1.0, 0.0, -s, 0.0, c);
 }
-
-vec3 calcDiff(BRDFVars bvars, SurfaceData surf) {        
-    float frk = 0.5 + 2.0 *  bvars.costd * bvars.costd * surf.roughness;        
-    return surf.basecolor * ONE_OVER_PI * (1.0 + (frk - 1.0) * pow5(1.0 - bvars.costl)) * (1.0 + (frk - 1.0) * pow5(1.0 - bvars.costv));
-    // return surf.basecolor * ONE_OVER_PI; // lambert
+mat3 rotationAroundXAxis(float c, float s) {
+    return mat3(1.0, 0.0, 0.0, 0.0, c, s, 0.0, -s, c);
 }
-
-float calcDistrScalar(BRDFVars bvars, float roughness) {
-    // D(h) factor
-    // using the GGX approximation where the gamma factor is 2.0
-    // Clamping roughness so that a directional light has a specular
-    // response.  A roughness of perfectly 0 will create light 
-    // singularities.
-    float alpha = roughness * roughness;
-    float denom = bvars.costh * bvars.costh * (alpha * alpha - 1.0) + 1.0;
-    float D = (alpha * alpha) / (PI * denom * denom); 
-    // using the GTR approximation where the gamma factor is generalized
-    // float gamma = 1.0;
-    // float sinth = length(cross(surf.normal, bvars.hdir));
-    // float D = 1.0 / pow(alpha * alpha * bvars.costh * bvars.costh + sinth * sinth, gamma);
-    return D;
-}
-
-float calcGeomScalar(BRDFVars bvars, float roughness) {    
-    // G(h,l,v) factor    
-    float k = roughness / 2.0;
-    float Gv = step(0.0, bvars.costv) * (bvars.costv / (bvars.costv * (1.0 - k) + k));
-    float Gl = step(0.0, bvars.costl) * (bvars.costl / (bvars.costl * (1.0 - k) + k));
-    return Gl * Gv;
-}
-
-
-vec3 calcFresnelColor(BRDFVars bvars, SurfaceData surf) {
-    // F(h,l) factor
-    vec3 F0 = surf.specular * mix(vec3(1.0), surf.basecolor, surf.metallic);    
-#if FRESNEL_HORNER_APPROXIMATION
-    vec3 F = F0 + (1.0 - F0) * exp2((-5.55473 * bvars.costd - 6.98316) * bvars.costd); 
-#else
-    vec3 F = F0 + (1.0 - F0) * pow5(1.0 - bvars.costd); 
-#endif    
-    return F;    
-}
-
-vec3 integrateDirLight(vec3 ldir, vec3 lcolor, SurfaceData surf) {
-    BRDFVars bvars = calcBRDFVars(surf, ldir);
-    vec3 cout = vec3(0.0);
-    float ndl = clamp(bvars.costl, 0.0, 1.0);
-    if (ndl > 0.0) {
-        vec3 diff = calcDiff(bvars, surf);
-        // remap hotness of roughness for analytic lights
-        float rroughness = max(0.05, surf.roughness);
-        float D = calcDistrScalar(bvars, rroughness);
-        float G = calcGeomScalar(bvars, (rroughness + 1.0) * 0.5);
-        vec3 F  = calcFresnelColor(bvars, surf);
-        vec3 spec = D * F * G / (4. * bvars.costl * bvars.costv);        
-        float shd = min(1.0 - surf.selfshad, calcSoftShadow(surf.point, ldir, 0.1, 20.0, 5.));
-        // cout   += diff * ndl * shd * lcolor;
-        cout   += spec * ndl * shd * lcolor;
-    }
-    return cout;
-}
-
-vec3 sampleEnvLight(vec3 ldir, vec3 lcolor, SurfaceData surf) {
-    BRDFVars bvars = calcBRDFVars(surf, ldir);
-    float ndl = clamp(bvars.costl, 0.0, 1.0);    
-    vec3 cout = vec3(0.0);
-    if (ndl > 0.0) {
-        float D = calcDistrScalar(bvars, surf.roughness);
-        float G = calcGeomScalar(bvars, surf.roughness);
-        vec3 F  = calcFresnelColor(bvars, surf);
-        // Combines the BRDF as well as the pdf of this particular
-        // sample direction.
-        vec3 spec = lcolor * G * F * bvars.costd / (bvars.costh * bvars.costv);        
-        float shd = min(1.0 - surf.selfshad, calcSoftShadow(surf.point, ldir, 0.02, 20.0, 7.));        
-        cout = spec * shd * lcolor;
-    }
-    return cout;
-}
-
-vec3 integrateEnvLight(SurfaceData surf, vec3 tint) {
-    vec3 vdir = normalize(surf.point - g_camOrigin);    
-    vec3 envdir = reflect(vdir, surf.normal);
-    // This is pretty hacky for a microfacet model. We are only
-    // sampling the environment in one direction when we should be
-    // using many samples and weight them based on their distribution.
-    // So to compensate for the hack, I blend towards the blurred version
-    // of the cube map as roughness goes up and decrease the light
-    // contribution as roughness goes up.
-    vec4 specolor = .4 * mix(texture2D(iChannel0, envdir.xy), texture2D(iChannel1, envdir.xy), surf.roughness) * (1.0 - surf.roughness);    
-    vec3 envspec = sampleEnvLight(envdir, tint * specolor.rgb, surf);
-    return envspec;
-}
-
-vec3 shadeSurface(SurfaceData surf) {    
-    vec3 amb = surf.basecolor * .02;
-    // ambient occlusion is amount of occlusion.  So 1 is fully occluded
-    // and 0 is not occluded at all.  Makes math easier when mixing 
-    // shadowing effects.
-    float ao = calcAO(surf.point, surf.normal);
-    vec3 cout = integrateDirLight(g_ldir, vec3(g_lillum), surf);
-    cout += integrateEnvLight(surf, vec3(g_lillum)) * (1.0 - 3.5 * ao);
-    cout += amb * (1.0 - 3.5 * ao);
-    return cout;
-}
-
-// CAMERA & GLOBALS
-void animateGlobals() {
+void animate() {
     // remap the mouse click ([-1, 1], [-1, 1])
     vec2 click = iMouse.xy / iResolution.xy;    
     // if click isn't initialized (negative), have reasonable defaults
     click = -1.0 + click * 2.0;
-    g_time = iGlobalTime;
+    global.time = iGlobalTime;
     // camera position
-    g_camOrigin = vec3(-13.0, 6.0, 0.0);    
-    float roty    = PI * click.x + g_time * 0.1;
+    global.camera.position = vec3(-13.0, 6.0, 0.0);    
+    float roty    = PI * click.x + global.time * 0.1;
     float cosroty = cos(roty);
     float sinroty = sin(roty);
     float rotx    = PI * 0.4 * (0.5 + click.y * 0.5);
     float cosrotx = cos(rotx);
     float sinrotx = sin(rotx);
-    g_lillum = .8;	
     // Rotate the camera around the origin
-    g_camOrigin = rotMatAroundYAxis(cosroty, sinroty) * rotMatAroundXAxis(cosrotx, sinrotx) * g_camOrigin;    
-    g_camPointAt   = vec3(0.0, -1.0, 0.0);    
-    float lroty    = g_time * 0.9;
+    global.camera.position = rotationAroundYAxis(cosroty, sinroty) * rotationAroundXAxis(cosrotx, sinrotx) * global.camera.position;    
+    global.camera.target   = vec3(0.0, -1.0, 0.0);    
+    float lroty    = global.time * 0.9;
     float coslroty = cos(lroty);
     float sinlroty = sin(lroty);
     // Rotate the light around the origin
-    g_ldir = rotMatAroundYAxis(coslroty, sinlroty) * g_ldir;
+    global.light.direction = rotationAroundYAxis(coslroty, sinlroty) * global.light.direction;
+    global.light.color = vec3(1.0);	
 }
-
 // CAMERA
-struct CameraData {
-    vec3 origin;
-    vec3 dir;
-    vec2 st;
-};
-
-CameraData setupCamera(vec4 fragCoord) {
+CameraData getCamera(vec4 fragCoord) {
     // aspect ratio
     float invar = iResolution.y / iResolution.x;
     vec2 st = fragCoord.xy / iResolution.xy - 0.5;
@@ -434,41 +458,42 @@ CameraData setupCamera(vec4 fragCoord) {
     // calculate the ray origin and ray direction that represents
     // mapping the image plane towards the scene
     vec3 iu = vec3(0.0, 1.0, 0.0);
-    vec3 iz = normalize(g_camPointAt - g_camOrigin);
+    vec3 iz = normalize(global.camera.target - global.camera.position);
     vec3 ix = normalize(cross(iz, iu));
     vec3 iy = cross(ix, iz);
-    vec3 dir = normalize(st.x * ix + st.y * iy + 1.0 * iz);
-    return CameraData(g_camOrigin, dir, st);
+    vec3 direction = normalize(st.x * ix + st.y * iy + 1.0 * iz);
+    return CameraData(global.camera.position, direction, st);
 }
 
-#define INITSURF(p, n) SurfaceData(p, n, vec3(0.0), 0.0, 1.0, 0.0, 0.0)
 void main() {   
-    animateGlobals();
-    CameraData cam = setupCamera(gl_FragCoord);
-    vec3 scenemarch = distmarch(cam.origin, cam.dir, DISTMARCH_MAXDIST);
-    // SHADING
-    vec3 scenecol = vec3(0.0);
-    if (scenemarch.y > 0.0) {
-        vec3 mp = cam.origin + scenemarch.x * cam.dir;
-        vec3 mn = calcNormal(mp);
-        SurfaceData currSurf = INITSURF(mp, mn);
-        material(scenemarch.y, scenemarch.z, currSurf);
-        scenecol = shadeSurface(currSurf);
+    vec3 rgb = vec3(0.0);
+    // SCENE
+    animate();
+    CameraData camera = getCamera(gl_FragCoord);
+    vec3 march = getDistanceMarch(camera.position, camera.direction, DM_MAX);
+    if (march.y > 0.0) {
+        vec3 point = camera.position + march.x * camera.direction;
+        vec3 normal = getNormal(point);
+        Surface surface = GET_SURFACE(point, normal);
+        setMaterial(march.y, march.z, surface);
+        // SHADING
+        rgb = getSurfaceColor(surface);
     }
     // POST PROCESSING
-    // fall off exponentially into the distance (as if there is a spot light
-    // on the point of interest).
-    scenecol  *= exp(-0.003 * (scenemarch.x * scenemarch.x - 20.0 * 20.0));
-    // Gamma correct
-    scenecol = pow(scenecol, vec3(0.45));
-    // Contrast adjust - cute trick learned from iq
-    scenecol = mix(scenecol, vec3(dot(scenecol,vec3(0.333))), -0.6);
-    // color tint
-    scenecol = 0.5 * scenecol + 0.5 * scenecol * vec3(1.0, 1.0, 0.9);
-    if (g_debugcolor.a > 0.0) {
-        gl_FragColor.rgb = g_debugcolor.rgb;
+    if (flags.post) {
+        // fall off exponentially into the distance (as if there is a spot light on the point of interest).
+        rgb *= exp(-0.003 * (march.x * march.x - 20.0 * 20.0));
+        // Gamma correct
+        rgb = pow(rgb, vec3(0.45));
+        // Contrast adjust - cute trick learned from iq
+        rgb = mix(rgb, vec3(dot(rgb, vec3(0.333))), -0.6);
+        // color tint
+        rgb = 0.5 * rgb + 0.5 * rgb * vec3(1.0, 1.0, 0.9);
+    }
+    if (global.debug.a > 0.0) {
+        gl_FragColor.rgb = global.debug.rgb;
     } else {
-        gl_FragColor.rgb = scenecol;
+        gl_FragColor.rgb = rgb;
     }
     gl_FragColor.a = 1.0;
 }
