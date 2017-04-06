@@ -11,8 +11,8 @@
 #define BIG_FLOAT   1000000.0
 
 // MATERIAL DEFINES
-#define SPHERE_MATL 1
-#define PLANE_MATL  2
+#define SPHERE_MATL 1.0
+#define PLANE_MATL  2.0
 #define COLS        3
 #define ROWS        3
 
