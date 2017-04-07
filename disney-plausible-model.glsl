@@ -26,7 +26,7 @@ struct Surface {
     vec3 color;
     float roughness;
     float specular;
-    float metallic;
+    float metalness;
     float shadow;
 };
 #define GET_SURFACE(point, normal) Surface(point, normal, vec3(0.0), 0.0, 1.0, 0.0, 0.0)
@@ -271,12 +271,12 @@ void setMaterial(float materialId, float surfaceId, inout Surface surface) {
         surface.color = vec3(1.0, 1.0, 1.0); 
         float ballrow = floor(surfaceId / float(COLS));
         surface.roughness = mod(surfaceId, float(COLS)) / float(COLS - 1);
-        surface.metallic = floor(surfaceId / float(COLS)) / float(ROWS - 1);
+        surface.metalness = floor(surfaceId / float(COLS)) / float(ROWS - 1);
         surface.specular = 0.8;
     } else if (materialId - 0.5 < FLOOR_MATL) {
         vec4 pavem = texture2D(iChannel2, 0.1 * surface.point.xz);
         surface.color = vec3(.1 * smoothstep(0.6, 0.3, pavem.r));
-        surface.metallic = 0.0;
+        surface.metalness = 0.0;
         surface.roughness = 0.6;
         surface.specular = 0.02; // .05        
         surface.normal.xz += 0.1 * pavem.bg;
@@ -316,7 +316,7 @@ float pow5(float value){
 }
 vec3 getFresnelColor(Brdf brdf, Surface surface) {
     // F(h,l) factor
-    vec3 fresnel = surface.specular * mix(vec3(1.0), surface.color, surface.metallic);    
+    vec3 fresnel = surface.specular * mix(vec3(1.0), surface.color, surface.metalness);    
 #if FRESNEL_HORNER_APPROXIMATION
     fresnel = fresnel + (1.0 - fresnel) * exp2((-5.55473 * brdf.costHalfLight - 6.98316) * brdf.costHalfLight); 
 #else
