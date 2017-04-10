@@ -1,20 +1,24 @@
 // ROW NUMBERS -87
 // References: http://disney-animation.s3.amazonaws.com/library/s2012_pbs_disney_brdf_notes_v2.0pdf
 
+#ifdef GL_ES
+	precision highp float;
+	precision highp int;
+#endif
+
 // CONSTANTS
-#define PI          3.14159
-#define TWO_PI      6.28318
-#define PI_OVER_TWO 1.570796
-#define ONE_OVER_PI 0.318310
-#define GR          1.61803398
-#define EPSILON     0.001
-#define BIG_FLOAT   1000000.0
+#define PI              3.14159265359
+#define TWO_PI          6.28318530718
+#define PI_OVER_TWO     1.57079632679
+#define ONE_OVER_PI     0.31830988618
+#define EPSILON         0.00100000000
+#define BIG_FLOAT       1000000.00000
 
 // MATERIAL DEFINES
-#define SPHERE_MATL 1.0
-#define FLOOR_MATL  2.0
-#define COLS        3
-#define ROWS        3
+#define SPHERE_MATL     1.0
+#define FLOOR_MATL      2.0
+#define COLS            3
+#define ROWS            3
 
 // SWITCHES
 #define FRESNEL_HORNER_APPROXIMATION 1
