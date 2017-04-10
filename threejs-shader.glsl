@@ -1,7 +1,7 @@
 let ts = `
 `;
 let shaderA = {
-constants: `
+	constants: `
 // ROW NUMBERS -87
 #extension GL_OES_standard_derivatives : enable
 
@@ -22,8 +22,11 @@ constants: `
 #define RAD             0.01745329251 // PI / 180
 #define F4              0.30901699437 // F4 = (sqrt(5.0) - 1.0) / 4.0    0.309016994374947451
 #define G4              0.13819660112 // G4 = (5.0 - sqrt(5.0)) / 20.0
+
+#define MAPPING			1			  // 1 - SPERICAL 0 - PLANAR
+
 `,
-structs: ` 
+	structs: ` 
 struct PointLight {
 	float distance;
 	float decay;
@@ -50,7 +53,7 @@ struct Flags {
 	bool displacement, diffuse, normal, bump, lights, albedo, noise, clouds;
 };
 `,
-uniforms: `
+	uniforms: `
 // attribute position: vec3, the vertex itself
 // attribute normal: vec3, the normal at the current vertex
 // attribute uv: vec2, the texture coord
@@ -79,28 +82,42 @@ varying vec3 vNormal;
 varying vec3 vViewPosition;
 varying mat4 modelView;
 
-uniform sampler2D diffuseMap;
-uniform Texture diffuseObj;
-varying vec2 diffuseUv;
+uniform sampler2D 	diffuseMap;
+uniform Texture 		diffuseObj;
+varying vec2 				diffuseUv;
 
-uniform sampler2D normalMap;
-uniform Texture normalObj;
-varying vec2 normalUv;
+uniform sampler2D 	normalMap;
+uniform Texture 		normalObj;
+varying vec2 				normalUv;
 
-uniform sampler2D bumpMap;
-uniform Texture bumpObj;
-varying vec2 bumpUv;
+uniform sampler2D 	bumpMap;
+uniform Texture 		bumpObj;
+varying vec2 				bumpUv;
 
 uniform PointLight pointLights[NUM_POINT_LIGHTS];
 
 uniform Flags flags;
 `,
-math: `
+	math: `
 mat2 rotate2d(float angle){
     return mat2(cos(angle), -sin(angle), sin(angle), cos(angle));
 }
+vec2 getUv(vec2 uv, vec3 point) {
+	if (MAPPING == 1) {
+		// For any point {\displaystyle P} P on the sphere, calculate d, that being the unit vector from P to the sphere's origin.
+		// Assuming that the sphere's poles are aligned with the Y axis, UV coordinates in the range [0,1]/[0,1] can then be calculated as follows:
+		// u = 0.5 + arctan2(d.z,d.x) / TWO_PI;
+		// v = 0.5 - arcsin(d.y) / PI;
+		vec3 d = normalize(point);
+		float u = 0.5 + atan(d.x, d.z) / TWO_PI; // swapped order;	
+		float v = 0.5 - asin(d.y) / PI;
+		return vec2(u, v);
+	} else {
+		return uv;
+	}
+}
 `,
-luma: `
+	luma: `
 float lumaFromRgb(vec3 rgb) {
 	float luma = dot(rgb, vec3(0.2126, 0.7152, 0.0722));
 	return luma;
@@ -115,7 +132,7 @@ float lumaAtOffset(sampler2D source, vec2 xy, vec4 offsetRepeat) {
 	return luma;
 }
 `,
-noise: `
+	noise: `
 vec4 mod289(vec4 x) {
     return x - floor(x * (1.0 / 289.0)) * 289.0;
 }
@@ -176,7 +193,7 @@ float snoise(vec4 v) {
 			+ i.y + vec4(i1.y, i2.y, i3.y, 1.0 ))
 			+ i.x + vec4(i1.x, i2.x, i3.x, 1.0 )
 	);
-    vec4 ip = vec4(1.0/294.0, 1.0/49.0, 1.0/7.0, 0.0);
+  vec4 ip = vec4(1.0/294.0, 1.0/49.0, 1.0/7.0, 0.0) ;
 	vec4 p0 = grad4(j0,   ip);
 	vec4 p1 = grad4(j1.x, ip);
 	vec4 p2 = grad4(j1.y, ip);
@@ -230,7 +247,7 @@ vec3 cloudToNormal() {
 	return vec3(horizontal, vertical, 1.0);
 }
 `,
-normals: `
+	normals: `
 vec2 dHdxy_fwd() {
 	vec2 xy = mod(bumpUv, 1.0);
 	vec2 dSTdx = dFdx(xy);
@@ -296,7 +313,7 @@ vec3 perturbNormalWithRgb(vec3 normal, vec3 rgb) {
 		return normalize(normal);
 }
 `,
-lights: `
+	lights: `
 vec3 lights(vec3 normal) {
 	float ls = 1.0, ss = 1.0;
 	vec3 rgb = vec3(ambient);
@@ -318,7 +335,7 @@ vec3 lights(vec3 normal) {
 		// float constant = 1.0;
 		// float linear = 1000.00;
 		// float quadratic = 0.9;
-        // float attenuation = (constant + linear * distance + quadratic * (distance * distance));
+    // float attenuation = (constant + linear * distance + quadratic * (distance * distance));
 		float distance = length(vector);
 		float attenuation = 1.0 / (distance / 500.0 - 1.0);
 		vec3 L = (lambert * glossiness * pl.color * attenuation);
@@ -333,8 +350,19 @@ vec3 lights(vec3 normal) {
 	*/
 	return rgb;
 }
+vec3 albedo(vec3 normal, vec3 light) {
+	float angle = max(dot(normalize(vViewPosition), normal * 1.7), 0.0);
+	float albedo = clamp(1.0 - angle, 0.0, 1.0);
+	albedo = smoothstep(0.2, 0.8, albedo);
+	light = smoothstep(0.2, 0.8, light * .6);
+	vec3 rgb = albedo * light * specular;
+	rgb = clamp(rgb, 0.0, 1.0);
+	rgb.r = smoothstep(0.11, 0.99, rgb.r);
+	rgb.g = smoothstep(0.11, 0.99, rgb.g);
+	return rgb;
+}
 `,
-fragment: `
+	fragment: `
 void main() {
 	vec3 rgb = diffuseObj.color;
 	if (flags.diffuse) {
@@ -347,7 +375,8 @@ void main() {
 	vec3 normal = normalize(vNormal) * flip;
 	if (flags.normal) {
 		normal = perturbNormal2Arb(-vViewPosition, normal);
-	} else if (flags.bump) {
+	}
+	if (flags.bump) {
 		normal = perturbNormalArb(-vViewPosition, normal, dHdxy_fwd());
 	}
 /*
@@ -357,45 +386,41 @@ void main() {
 		rgb += trgb * 5.0;
 		normal = perturbNormalWithRgb(normal, trgb * 10.0);
 	}
+*/
+/*
 	if (flags.clouds) {
 		vec3 trgb = clouds(vUv);
 		rgb += trgb;
 	}
 */
 	vec3 light = vec3(0.0);
-	// float luma = 0.0;
 	if (flags.lights) {
 		light = lights(normal);
 		rgb *= light;
-		// luma = lumaFromRgb(light);
-		// c = mix(c, light, light);
-		// c *= light; 
-		// c += mix(vec3(0.0), light, light);
 	}
 	if (flags.albedo) {
-		float dp = max(dot(normalize(vViewPosition), normal * 1.0), 0.0);
-		float albedo = min(1.0, max(1.0 - dp, 0.0));
-		albedo = smoothstep(0.39, 0.79, albedo);
-		// albedo *= albedo * luma * luma;
-		rgb += albedo * smoothstep(0.5, 0.8, light) * specular;
+		rgb += albedo(normal, light);
 	}
 	gl_FragColor = vec4(rgb, 1.0);
 }
 `,
-vertex: `
+	vertex: `
 void main() { 
-	diffuseUv = uv * diffuseObj.offset.zw + diffuseObj.offset.xy; 
-	normalUv = uv * normalObj.offset.zw + normalObj.offset.xy;
-	bumpUv = uv * bumpObj.offset.zw + bumpObj.offset.xy;
 	vUv = uv;
+	// vUv = getUv(uv, position);
+	diffuseUv = vUv * diffuseObj.offset.zw + diffuseObj.offset.xy; 
+	normalUv = vUv * normalObj.offset.zw + normalObj.offset.xy;
+	bumpUv = vUv * bumpObj.offset.zw + bumpObj.offset.xy;
 	vec3 objectNormal = vec3(normal);
 	#ifdef FLIP_SIDED
 		objectNormal = -objectNormal;
 	#endif
 	vec3 transformedNormal = normalMatrix * objectNormal;
+
 	#ifndef FLAT_SHADED // Normal computed with derivatives when FLAT_SHADED
 		vNormal = normalize(transformedNormal);
 	#endif
+
 	vec3 transformed = vec3(position);
 	if (flags.displacement) {
 		float x = 1.0 + cos(u_time + transformed.x * 0.1) * .03;
@@ -404,13 +429,21 @@ void main() {
 		transformed.x *= x;
 		transformed.y *= y;
 		transformed.z *= z;
+/*
+		vec3 dx = dFdx(transformed.xyz);
+		vec3 dy = dFdy(transformed.xyz);
+		vNormal = normalize(cross(dx, dy));
+*/
+		/*
 		vNormal.x += (x * RAD); // tofix
 		vNormal.y += (y * RAD); // tofix
 		vNormal.z += (z * RAD); // tofix
+		*/
 	}
 	#ifdef USE_DISPLACEMENTMAP
 		transformed += normal * (texture2D(displacementMap, uv).x * displacementObj.strength + displacementObj.bias);
 	#endif
+
 	vec4 mvPosition = modelViewMatrix * vec4(transformed, 1.0);
 	vViewPosition = -mvPosition.xyz;
 	gl_Position = projectionMatrix * mvPosition;
@@ -640,12 +673,20 @@ let world = new World({
 	objects: function(world: World) {
 		group = new THREE.Group();
 		group.rotation.y = -Math.PI / 180 * 40;
-		let diffusePath = 'http://extranet.wslabs.it/ios/terrain.jpg';
+		// let diffusePath = 'http://extranet.wslabs.it/ios/terrain.jpg';
+		let diffusePath = 'https://www.classe.cornell.edu/~seb/celestia/marsc-2k.jpg';
+		// let diffusePath = 'https://s-media-cache-ak0.pinimg.com/originals/be/ba/b4/bebab4e9768b78a4f5dc8b7a2b24daaf.jpg';
 		// let diffusePath = 'https://s-media-cache-ak0.pinimg.com/originals/72/59/d9/7259d9158be0b7e8c62c887fac57ed81.png';
 		let normalPath = 'https://cdna.artstation.com/p/assets/images/images/002/873/096/large/luc-as-seamless-nrm.jpg';
+		// let normalPath = 'http://i.imgur.com/rUzXHrj.jpg';
 		// let normalPath = 'https://filterforge.com/filters/12878-normal.jpg';
 		// let normalPath = 'https://www.filterforge.com/filters/634-normal.jpg';
 		// let normalPath = 'https://s3.amazonaws.com/docs.knaldtech.com/docuwiki/sci_fi_normal.jpg';
+		// let normalPath = 'http://midnightmartian.com/Kayuga/LALT_normalmap_enhanced.png';
+		// let normalPath = 'http://planetmaker.wthr.us/img/moon_lro_normalmap_8192x4096.jpg';
+		// let normalPath = 'http://planetmaker.wthr.us/img/mars_mola_normalmap_flat_8192x4096.jpg';
+		// let bumpMap = 'http://planetmaker.wthr.us/img/moon_lro_bumpmap_8192x4096.jpg';
+		// let specularPath = 'http://planetmaker.wthr.us/img/mars_mola_specularmap_8192x4096.jpg';
 		shader = new THREE.ShaderMaterial({
 			uniforms: THREE.UniformsUtils.merge([
 				THREE.UniformsLib['lights'], {
@@ -656,15 +697,15 @@ let world = new World({
 					ambient: { value: new THREE.Color(0x000011) },
 					specular: { value: new THREE.Color(0xffffdd) },	
 					//
-					glossiness: { value: 1.0 },
 					specularity: { value: 1.0 },				
+					glossiness: { value: 1.0 },
 					//
 					diffuseMap : { value: null },
 					diffuseObj: {
 						value: {
 							color: new THREE.Color(0xdddddd),
 							strength: 0.7,
-							offset: new THREE.Vector4(0,0,4,2),
+							offset: new THREE.Vector4(0,0,1,1),
 						}
 					},
 					//
@@ -673,7 +714,7 @@ let world = new World({
 						value: {
 							color: new THREE.Color(0xdddddd),
 							strength: 0.2,
-							offset: new THREE.Vector4(0,0,8,4),
+							offset: new THREE.Vector4(0,0,1,1),
 						}
 					},
 					//
@@ -682,7 +723,7 @@ let world = new World({
 						value: {
 							color: new THREE.Color(0xdddddd),
 							strength: 0.8,
-							offset: new THREE.Vector4(0,0,8,4),
+							offset: new THREE.Vector4(0,0,1,1),
 						}
 					},
 					//
@@ -717,10 +758,12 @@ let world = new World({
 		});
 		let loader = new THREE.TextureLoader();
 		loader.crossOrigin = '';
-		loader.load('https://crossorigin.me/' + diffusePath, function (texture) {
+		loader.load('https://crossorigin.me/' + diffusePath, function (texture) {		
+			texture.mapping = THREE.SphericalReflectionMapping;
 			shader.uniforms.diffuseMap.value = texture;
 		});	
-		loader.load('https://crossorigin.me/' + normalPath, function (texture) {
+		loader.load('https://crossorigin.me/' + normalPath, function (texture) {		
+			texture.mapping = THREE.SphericalReflectionMapping;
 			shader.uniforms.normalMap.value = texture;
 			shader.uniforms.bumpMap.value = texture;
 		});
@@ -733,8 +776,9 @@ let world = new World({
 		world.scene.add(group);
 	},
 	lights: function(world: World) {
-		let colors = [0xff0000, 0x00ff00, 0x0000ff]; 
-		// let colors = [0xffffcc];
+		// let colors = [0xff0000, 0x00ff00, 0x0000ff]; 
+		// let colors = [0xffffcc, 0xffffcc, 0xffffcc];
+		let colors = [0xffffcc];
 		for (let color of colors) {
 				let light = new THREE.PointLight(color, 1, 0, 1);
 				light.geopos = new Geopos().randomize(1000);
@@ -762,54 +806,54 @@ let world = new World({
 	},
 });
 let params = {
-    displacement: false,
-    diffuse: true,
-    normal: true,
-    bump: false,
-    noise: false,
-    clouds: false,
+		displacement: false,
+		diffuse: true,
+		normal: true,
+		bump: false,
+		noise: false,
+		clouds: false,
     albedo: true,
-    lights: true,
-    specularity: 0.8,
-    glossiness: 0.8,
-    randomize: function () {
-        for(let i = 0; i < gui.__controllers.length; i++) {
-            let c = gui.__controllers[i];
-            if (c.__min) {
-                let value = c.__min + (c.__max - c.__min) * Math.random();
-                this[c.property] = value;
-                c.updateDisplay();
-            }
+		lights: true,
+		specularity: 0.25,
+		glossiness: 0.6,
+		randomize: function () {
+      for(let i = 0; i < gui.__controllers.length; i++) {
+        let c = gui.__controllers[i];
+        if (c.__min) {
+          let value = c.__min + (c.__max - c.__min) * Math.random();
+          this[c.property] = value;
+          c.updateDisplay();
         }
-        world.setParams(this);
+      }
+			world.setParams(this);
     },
 };
 let gui = function datgui() {
-    let gui = new dat.GUI();
-    gui.closed = true;
-    let keys = [];
-    for (let param in params) {
-        keys.push(param);
-    }
-    for (let param of keys) {
-        // console.log(param);
-        let p;
-        if (typeof params[param] == 'number') {
-            p = gui.add(params, param, 0.0, 1.0);
-        } else {
-            p = gui.add(params, param);
-        }
-        p.onChange(function(newValue) {
-            world.setParams(params);
-        });
-    }
-    /*
-    var f2 = gui.addFolder('Light');
-    f2.add(params, 'growthSpeed');
-    f2.add(params, 'maxSize');
-    f2.add(params, 'message');
-    f2.open();
-    */
-    return gui;
+  let gui = new dat.GUI();
+  gui.closed = true;
+	let keys = [];
+	for (let param in params) {
+		keys.push(param);
+	}
+	for (let param of keys) {
+		// console.log(param);
+		let p;
+		if (typeof params[param] == 'number') {
+			p = gui.add(params, param, 0.0, 1.0);
+		} else {
+			p = gui.add(params, param);
+		}
+		p.onChange(function(newValue) {
+			world.setParams(params);
+		});
+	}
+	/*
+	var f2 = gui.addFolder('Light');
+	f2.add(params, 'growthSpeed');
+	f2.add(params, 'maxSize');
+	f2.add(params, 'message');
+	f2.open();
+	*/
+  return gui;
 }();
 world.setParams(params);
