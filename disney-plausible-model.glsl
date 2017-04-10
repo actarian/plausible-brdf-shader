@@ -35,21 +35,18 @@ struct Surface {
 };
 #define GET_SURFACE(point, normal) Surface(point, normal, vec3(0.0), 0.0, 1.0, 0.0, 0.0)
 
-struct CameraData {
-    vec3 position;
-    vec3 direction;
-    vec2 st;
-};
-
 struct Camera {
     vec3 position;
     vec3 target;
+    vec3 direction;
 };
+#define GET_CAMERA() Camera(vec3(0.0), vec3(0.0), vec3(0.0))
 
 struct Light {
     vec3 direction;
     vec3 color;
 };
+#define GET_LIGHT() Light(vec3(1.0, 0.0, 0.0), vec3(1.0))
 
 struct Global {
     Camera camera;
@@ -89,8 +86,8 @@ Flags flags = Flags(
 ); 
 
 Global global = Global(
-    Camera(vec3(0.0), vec3(0.0)), 
-    Light(vec3(1.0, 0.0, 0.0), vec3(0.0)), 
+    Camera(vec3(0.0), vec3(0.0), vec3(0.0)), 
+    Light(vec3(1.0, 0.0, 0.0), vec3(1.0)), 
     0.0, 
     vec4(0.0)
 );
@@ -447,7 +444,7 @@ void animate() {
     global.light.color = vec3(1.0, 1.0, 1.0 + cos(global.time));	
 }
 // CAMERA
-CameraData getCamera(vec4 fragCoord) {
+Camera getCamera(vec4 fragCoord) {
     // Aspect ratio
     float invar = iResolution.y / iResolution.x;
     vec2 st = fragCoord.xy / iResolution.xy - 0.5;
@@ -458,14 +455,14 @@ CameraData getCamera(vec4 fragCoord) {
     vec3 ix = normalize(cross(iz, iu));
     vec3 iy = cross(ix, iz);
     vec3 direction = normalize(st.x * ix + st.y * iy + 1.0 * iz);
-    return CameraData(global.camera.position, direction, st);
+    return Camera(global.camera.position, global.camera.target, direction);
 }
 
 void main() {   
     vec3 rgb = vec3(0.0);
     // SCENE
     animate();
-    CameraData camera = getCamera(gl_FragCoord);
+    Camera camera = getCamera(gl_FragCoord);
     vec3 march = getDistanceMarch(camera.position, camera.direction, DM_MAX);
     if (march.y > 0.0) {
         vec3 point = camera.position + march.x * camera.direction;
