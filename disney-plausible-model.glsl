@@ -1,3 +1,5 @@
+// License Creative Commons Attribution-NonCommercial-ShareAlike 3.0 Unported License.
+// Created by L.Zampetti (C) 2017 
 // ROW NUMBERS -87
 // References: http://disney-animation.s3.amazonaws.com/library/s2012_pbs_disney_brdf_notes_v2.0pdf
 

@@ -1,3 +1,5 @@
+// License Creative Commons Attribution-NonCommercial-ShareAlike 3.0 Unported License.
+// Created by L.Zampetti (C) 2017 
 let ts = `
 `;
 let shaderA = {
