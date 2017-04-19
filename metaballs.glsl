@@ -1,17 +1,18 @@
-/*by mu6k, Creative Commons Attribution-NonCommercial-ShareAlike 3.0 Unported License.
+/*
+by mu6k, Creative Commons Attribution-NonCommercial-ShareAlike 3.0 Unported License.
 
- I have no idea how I ended up here, but it demosceneish enough to publish.
- You can use the mouse to rotate the camera around the 'object'.
- If you can't see the shadows, increase occlusion_quality.
- If it doesn't compile anymore decrease object_count and render_steps.
+I have no idea how I ended up here, but it demosceneish enough to publish.
+You can use the mouse to rotate the camera around the 'object'.
+If you can't see the shadows, increase occlusion_quality.
+If it doesn't compile anymore decrease object_count and render_steps.
 
- 15/06/2013:
- - published
- 
- 16/06/2013:
- - modified for better performance and compatibility
+15/06/2013:
+- published
 
- muuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuusk!*/
+16/06/2013:
+- modified for better performance and compatibility
+
+muuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuusk!*/
 
 #define occlusion_enabled
 #define occlusion_quality 4
@@ -37,8 +38,8 @@ float hash(vec2 x) {
 	return fract(cos(dot(x.xy, vec2(2.31, 53.21)) * 124.123) * 412.0); 
 }
 
-vec3 cc(vec3 color, float factor,float factor2) //a wierd color modifier
-{
+//a wierd color modifier
+vec3 cc(vec3 color, float factor,float factor2) {
 	float w = color.x + color.y + color.z;
 	return mix(color, vec3(w) * factor, w * factor2);
 }
@@ -52,8 +53,8 @@ float hashmix(float x0, float x1, float interp) {
 	return mix(x0, x1, interp);
 }
 
-float noise(float p) // 1D noise
-{
+// 1D noise
+float noise(float p) {
 	float pm = mod(p, 1.0);
 	float pd = p - pm;
 	return hashmix(pd, pd + 1.0, pm);
@@ -79,15 +80,16 @@ vec3 rotate_x(vec3 v, float angle) {
 	);
 }
 
-float max3(float a, float b, float c)//returns the maximum of 3 values
-{
+//returns the maximum of 3 values
+float max3(float a, float b, float c) {
 	return max(a, max(b, c));
 }
 
-vec3 bpos[object_count];//position for each metaball
+//position for each metaball
+vec3 bpos[object_count];
 
-float dist(vec3 p)//distance function
-{
+//distance function
+float dist(vec3 p) {
 	float d = 1024.0;
 	float nd;
 	for (int i = 0; i < object_count; i++) {
@@ -100,16 +102,17 @@ float dist(vec3 p)//distance function
 	return d;
 }
 
-vec3 normal(vec3 p, float e) //returns the normal, uses the distance function
-{
+//returns the normal, uses the distance function
+vec3 normal(vec3 p, float e) {
 	float d = dist(p);
 	return normalize(vec3(dist(p + vec3(e, 0, 0)) - d, dist(p + vec3(0, e, 0)) - d, dist(p + vec3(0, 0, e)) - d));
 }
 
-vec3 light = light_direction; //global variable that holds light direction
+//global variable that holds light direction
+vec3 light = light_direction;
 
-vec3 background(vec3 d)//render background
-{
+//render background
+vec3 background(vec3 d) {
 	float t = iGlobalTime * 0.5 * light_speed_modifier;
 	float qq = dot(d, light) * 0.5 + 0.5;
 	float bgl = qq;
@@ -119,8 +122,8 @@ vec3 background(vec3 d)//render background
 	return sky;
 }
 
-float occlusion(vec3 p, vec3 d)//returns how much a point is visible from a given direction
-{
+//returns how much a point is visible from a given direction
+float occlusion(vec3 p, vec3 d) {
 	float occ = 1.0;
 	p = p + d;
 	for (int i = 0; i < occlusion_quality; i++) {
@@ -166,16 +169,16 @@ vec3 object_material(vec3 p, vec3 d) {
 #define offset1 4.7
 #define offset2 4.6
 
-void main()
-{
+void main() {
+	
 	vec2 uv = gl_FragCoord.xy / iResolution.xy - 0.5;
 	uv.x *= iResolution.x / iResolution.y; //fix aspect ratio
 	vec3 mouse = vec3(0.0);
 	
 	float t = iGlobalTime * 0.5 * object_speed_modifier + 2.0;
 	
-	for (int i = 0; i < object_count; i++) //position for each metaball
-	{
+	//position for each metaball
+	for (int i = 0; i < object_count; i++) {
 		bpos[i] = 1.3 * vec3(
 			sin(t * 0.967 + float(i) * 42.0),
 			sin(t * 0.423 + float(i) * 152.0),
@@ -203,13 +206,15 @@ void main()
 		if (dd < .04 || dd > 4.0) break;
 	}
 	
-	if (dd<0.5) //close enough
+	if (dd<0.5) {
+		//close enough
 		color = object_material(p, d);
-	else
+	} else {
 		color = background(d);
-	
+	}
+
 	//post procesing
-	color *=.85;
+	color *= .85;
 	color = mix(color, color * color, 0.3);
 	color -= hash(color.xy + uv.xy) * 0.015;
 	color -= length(uv) * 0.1;
