@@ -258,6 +258,19 @@ float ellipsoid(in vec3 p, in vec3 r) {
     return (length( p/r ) - 1.0) * min(min(r.x,r.y),r.z);
 }
 
+// particles
+/*
+float particles (vec3 p) {
+	vec3 pos = p;
+	pos.y -= iGlobalTime*0.02;
+	float n = fbm(20.0*pos);
+	n = pow(n, 5.0);
+	float brightness = noise(10.3*p);
+	float threshold = 0.26;
+	return smoothstep(threshold, threshold + 0.15, n)*brightness*90.0;
+}
+*/
+
 // boolean operation
 float bIntersect(float da, float db) {
     return max(da, db);
@@ -394,7 +407,46 @@ struct Material {
 	float glossiness;
 	float shininess;
 };
-Material material;
+Material getMaterial(int m) {
+	Material material;
+	if (m == 1) {
+		material = Material(
+			vec3(0.0, 0.0, 1.0), // color
+			0.3, // ambient,
+			0.6, // glossiness
+			1.9 // shininess
+		);
+	} else if (m == 2) {
+		material = Material(
+			vec3(1.0, 1.0, 1.0), // color
+			0.4, // ambient,
+			0.8, // glossiness
+			0.9 // shininess
+		);
+	} else if (m == 3) {
+		material = Material(
+			vec3(0.0, 1.0, 0.0), // color
+			0.3, // ambient,
+			0.6, // glossiness
+			1.9 // shininess
+		);
+	} else if (m == 4) {
+		material = Material(
+			vec3(1.0, 1.0, 0.0), // color
+			0.9, // ambient,
+			0.6, // glossiness
+			1.9 // shininess
+		);
+	} else if (m == 5) {
+		material = Material(
+			vec3(1.0, 1.0, 0.0), // color
+			0.5, // ambient,
+			0.8, // glossiness
+			0.3 // shininess
+		);
+	}
+	return material;
+}
 
 // ###############
 // ###  SCENE  ###
@@ -457,16 +509,18 @@ float rocky(vec3 p) {
 		 0.06997493955670424, 0.6653237235314099, -0.7432683571499161,
 		-0.9548821651308448,  0.26025457467376617, 0.14306504491456504
 	);
-	vec3 p1 = M * (p + cos(u_time * 0.05));
-	vec3 p2 = M * (p1 + sin(u_time * 0.05));
+	// vec3 p1 = M * p;
+	// vec3 p2 = M * p1;
+	vec3 p1 = M * (p + cos(u_time * 0.01));
+	vec3 p2 = M * (p1 + sin(u_time * 0.01));
 	float n1 = noise(p1 * 8.);
 	float n2 = noise(p2 * 16.);
 	float n3 = noise(p2 * 32.);
-	float n4 = noise(p1 * 128.);
-	float rocky = 	0.1 * n1 * n1 + 
-					0.05 * n2 * n2 + 
-					0.02 * n3 * n3 + 
-					0.01 * n4;
+	float n4 = noise(p1 * 96.);
+	float rocky = 	(0.15 + 0.05 * cos(u_time * 2.)) * n1 * n1 + 
+					(0.075 + 0.025 * sin(u_time * 1.)) * n2 * n2 + 
+					(0.03 + 0.01 * cos(u_time * .5)) * n3 * n3 + 
+					(0.01 + 0.005 * sin(u_time * .25)) * n4;
 	return rocky * 0.3; // (0.2 + 0.3 * abs(cos(u_time * 0.5)));
 }
 float getRock(vec3 p) {
@@ -514,34 +568,42 @@ float getClouds(vec3 p) {
 	return max(c, -s);
 	*/
 }
+float getCube(vec3 p) {
+	float c = roundBox(p, vec3(0.13), 0.03); // capsule(p, vec3(0.0, 0.0, -1.0), vec3(0.0, 0.0, 1.0), 0.02);
+	float s = sphere(p, .2);
+	return max(c, -s);
+}
+float getPlane(vec3 p) {
+	return plane(p, vec4(0.0, 1.0, 0.0, 2.0));
+}
+int materialId = 1;
 float scene(vec3 p) {
-	float 	a = 1000000.0, // getSpheres(p),
-			b = getClouds(p),
-			c = 1000000.0; // getTorus(p);
-	float distance = min(a, min(b, c));
-	if (distance == a) {
-		material = Material(
-			vec3(0.0, 0.0, 1.0), // color
-			0.3, // ambient,
-			0.6, // glossiness
-			1.9 // shininess
-		);
-	} else if (distance == b) {
-		material = Material(
-			vec3(1.0, 1.0, 1.0), // color
-			0.05, // ambient,
-			0.99, // glossiness
-			0.01 // shininess
-		);
-	} else if (distance == c) {
-		material = Material(
-			vec3(0.0, 1.0, 0.0), // color
-			0.3, // ambient,
-			0.6, // glossiness
-			1.9 // shininess
-		);
+	float 	a = 1000000.0,
+			// a = getSpheres(p),
+			// b = getClouds(p),
+			b = 1000000.0,
+			// c = 1000000.0,
+			c = getTorus(p),
+			// d = 1000000.0,
+			d = getCube(p),
+			e = getPlane(p);
+	if (b < a) {
+		a = b;
+		materialId = 2;
 	}
-	return distance;
+	if (c < a) {
+		a = c;
+		materialId = 3;
+	}
+	if (d < a) {
+		a = d;
+		materialId = 4;
+	}
+	if (e < a) {
+		a = e;
+		materialId = 5;
+	}
+	return a;
 }
 // ###############
 // ###  SCENE  ###
@@ -612,7 +674,6 @@ Camera getCamera(vec3 position, vec3 target) {
 }
 
 // MARCHER
-const int STEPS = 48; // 128	
 struct Marcher {
     vec3 origin;
     vec3 direction;
@@ -667,7 +728,48 @@ struct Light {
 	float attenuation;
 	float diffuse;
 	float specular;
+	float occlusion;
 };
+/*
+float __getOcclusion(vec3 p, vec3 n) {
+    float step = 8.0;
+    float ao = 0.0;
+    float dist;
+    for (int i = 1; i <= 3; i++) {
+        dist = step * float(i);
+		ao += max(0.0, (dist - scene(p + n * dist).y) / dist);  
+    }
+    return 1.0 - ao * 0.1;
+}
+*/
+const int OSTEPS = 4;
+float getOcclusion(vec3 p, vec3 d) {
+	float occ = 1.0;
+	p += d;
+	for (int i = 0; i < OSTEPS; i++) {
+		float distance = scene(p);
+		p += d * distance;
+		occ = min(occ, distance);
+	}
+	return max(0.0, occ);
+}
+
+float getSoftShadow(in vec3 ro, in vec3 rd, float mint, float k, in vec4 c ) {
+    return 1.0;
+	/*
+	float res = 1.0;
+    float t = mint;
+    for( int i=0; i<64; i++ ) {
+        vec4 kk;
+        float h = scene(ro + rd*t, kk, c);
+        res = min( res, k*h/t );
+        if( res<0.001 ) break;
+        t += clamp( h, 0.01, 0.5 );
+    }
+    return clamp(res,0.0,1.0);
+	*/
+}
+
 Light getLight(vec3 color, vec3 position, Material material, Surface surface, Camera camera) {
 	// Light needs to have a position, a direction and a color. Obviously, it should be positioned away from the
 	// object's surface. The direction vector is the normalized vector running from the light position to the object's surface point that we're
@@ -694,7 +796,7 @@ Light getLight(vec3 color, vec3 position, Material material, Surface surface, Ca
 	// specular. The object's specular value, which depends on the angle that the reflected light hits the object, and the viewing angle... kind of.
 	// specularity. The power of the specularity. Higher numbers can give the object a harder, shinier look.
 	const float specularity = 16.0;
-	Light light = Light(color, position, vec3(0.0), vec3(0.0), 0.0, 0.0, 0.0, 0.0);
+	Light light = Light(color, position, vec3(0.0), vec3(0.0), 0.0, 0.0, 0.0, 0.0, 1.0);
 	light.direction = light.position - surface.position;
 	light.distance = length(light.direction);
 	light.direction /= light.distance; // Normalizing the light-to-surface, aka light-direction, vector.
@@ -703,14 +805,50 @@ Light getLight(vec3 color, vec3 position, Material material, Surface surface, Ca
 	light.diffuse = max(0.0, dot(surface.normal, light.direction));
 	light.specular = max(0.0, dot(light.reflected, normalize(camera.position - surface.position)));
 	light.specular = pow(light.specular, specularity); // Ramping up the specular value to the specular power for a bit of shininess.
+	// light.shadow = getSoftShadow(surface.position, light.position, 0.001, 64.0, vec4(color, 1.0));
+	if (true) {
+		float diffuseOcclusion = getOcclusion(surface.position, light.direction);
+		float specularOcclusion = getOcclusion(surface.position, light.reflected);
+		light.diffuse *= diffuseOcclusion;
+		light.specular *= specularOcclusion;
+		light.occlusion = getOcclusion(surface.position, surface.normal);
+		if (true) {
+			light.occlusion += diffuseOcclusion + specularOcclusion;
+			light.occlusion *= .3;
+		}
+	}
+	
+	/*
+	#ifdef occlusion_enabled
+		float oa = getOcclusion(p, n) * 0.4 + 0.6;
+		float od = getOcclusion(p, light) * 0.95 + 0.05;
+		float os = getOcclusion(p, r) * 0.95 + 0.05;
+	#else
+		float oa = 1.0;
+		float ob = 1.0;
+		float oc = 1.0;
+	#endif	
+	#ifndef occlusion_preview
+		color = color * oa * .2 + //ambient
+		color * diffuse * od * .7 + //diffuse
+		background(r) * os * reflectance * .7; //reflection
+	#else
+		color=vec3((oa+od+os)*.3);
+	#endif
+	*/
 	return light;
 }
 vec3 calcLight (Light light, Material material) {
 	// Bringing all the lighting components together to color the screen pixel. By the way, this is a very simplified version of Phong lighting.
 	// It's "kind of" correct, and will suffice for this example. After all, a lot of lighting is fake anyway.
-	return (material.color * (material.ambient + light.diffuse * material.glossiness) + light.specular * material.shininess) * light.color * light.attenuation;
+	if (false) {
+		return vec3(light.occlusion);
+	} else {
+		return (material.color * (material.ambient * light.occlusion + light.diffuse * material.glossiness) + light.specular * material.shininess) * light.color * light.attenuation;
+	}
 }
 
+const int STEPS = 64; // 128	
 float getRayDistance(Marcher marcher, Camera camera) {
 	marcher.distance = 0.0;
 	marcher.depth = camera.near; // Ray depth. "start" is usually zero, but for various reasons, you may wish to start the ray further away from the origin.
@@ -770,6 +908,7 @@ vec3 render() {
 	}
 	// SURFACE. If we've made it this far, we've hit something. 
 	Surface surface = getSurface(marcher);
+	Material material = getMaterial(materialId);
 	if (false) {
 		// Just some really lame, fake shading/coloring for the object. You can comment the two lines out with no consequence.
 		float bumps = sinusoidBumps(surface.position);
@@ -778,13 +917,18 @@ vec3 render() {
 	// LIGHT
 	Light light = getLight(
 		vec3(1.0, 1.0, 1.0), // color
-		vec3(1.0), // vec3(1.5 * sin(u_time * 0.5), 0.75 + 0.25 * cos(u_time * 0.5), -1.0), // position
+		// vec3(1.0), 
+		vec3(1.5 * sin(u_time * 0.5), 0.75 + 0.25 * cos(u_time * 0.5), -1.0), // position
 		material,
 		surface,
 		camera
 	);
 	// LAMBERT
 	surface.rgb = calcLight(light, material);
+	// float shadowBias = 1.0e-4;
+	// if (scene(surface.position + light.direction * shadowBias) >= marcher.threshold) {
+	// 	surface.rgb = vec3(0.1);
+	// }
 	// FOG
 	surface.rgb = mix(surface.rgb, background, clamp(marcher.distance / 20.0, 0.0, 1.0));
 	// Clamping the lit pixel between black and while, then putting it on the screen. We're done. Hooray!
