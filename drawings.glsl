@@ -50,6 +50,61 @@ vec3 yellow = 	vec3(1.0, 1.0, 0.0);
 vec3 magenta = 	vec3(1.0, 0.0, 1.0);
 vec3 cyan = 	vec3(0.0, 1.0, 1.0);
 
+// MATERIALS
+struct Material {
+	vec3 color;
+	float ambient; // The object's ambient property. You can also have a global and light ambient property, but we'll try to keep things simple.	
+	float glossiness;
+	float shininess;
+};
+Material getMaterial(int m) {
+	Material material;
+	if (m == 1) {
+		material = Material(
+			vec3(0.0, 0.0, 1.0), // color
+			0.3, // ambient,
+			0.6, // glossiness
+			1.9 // shininess
+		);
+	} else if (m == 2) {
+		material = Material(
+			vec3(1.0, 1.0, 1.0), // color
+			0.4, // ambient,
+			0.8, // glossiness
+			0.9 // shininess
+		);
+	} else if (m == 3) {
+		material = Material(
+			vec3(0.0, 1.0, 0.0), // color
+			0.3, // ambient,
+			0.6, // glossiness
+			1.9 // shininess
+		);
+	} else if (m == 4) {
+		material = Material(
+			vec3(1.0, 1.0, 0.0), // color
+			0.9, // ambient,
+			0.6, // glossiness
+			1.9 // shininess
+		);
+	} else if (m == 5) {
+		material = Material(
+			vec3(1.0, 1.0, 0.0), // color
+			0.5, // ambient,
+			0.8, // glossiness
+			0.3 // shininess
+		);
+	} else if (m == 6) {
+		material = Material(
+			vec3(1.0, 1.0, 1.0), // color
+			0.2, // ambient,
+			0.9, // glossiness
+			0.2 // shininess
+		);
+	}
+	return material;
+}
+
 // MATH
 const mat4 projection = mat4(
 	vec4(3.0 / 4.0, 0.0, 0.0, 0.0),
@@ -184,6 +239,158 @@ vec3 drawPoint(vec4 p) {
 	return drawPoint(p, white, 2.0);	
 }
 
+// NOISES
+
+// NOISE
+vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+vec2 mod289(vec2 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+vec3 permute(vec3 x) { return mod289(((x * 34.0) + 1.0) * x); }
+// simplex noise
+float snoise(vec2 v) {
+    const vec4 C = vec4(
+		 0.211324865405187,  	// (3.0-sqrt(3.0))/6.0
+		 0.366025403784439,  	// 0.5*(sqrt(3.0)-1.0)
+		-0.577350269189626,  	// -1.0 + 2.0 * C.x
+		 0.024390243902439 		// 1.0 / 41.0
+	);
+    vec2 i  = floor(v + dot(v, C.yy));
+    vec2 x0 = v -   i + dot(i, C.xx);
+    vec2 i1;
+    i1 = (x0.x > x0.y) ? vec2(1.0, 0.0) : vec2(0.0, 1.0);
+    vec4 x12 = x0.xyxy + C.xxzz;
+    x12.xy -= i1;
+    i = mod289(i); // Avoid truncation effects in permutation
+    vec3 p = permute(permute(i.y + vec3(0.0, i1.y, 1.0 )) + i.x + vec3(0.0, i1.x, 1.0));
+    vec3 m = max(0.5 - vec3(dot(x0, x0), dot(x12.xy, x12.xy), dot(x12.zw, x12.zw)), 0.0);
+    m = m * m;
+    m = m * m;
+    vec3 x = 2.0 * fract(p * C.www) - 1.0;
+    vec3 h = abs(x) - 0.5;
+    vec3 ox = floor(x + 0.5);
+    vec3 a0 = x - ox;
+    m *= 1.79284291400159 - 0.85373472095314 * (a0 * a0 + h * h);
+    vec3 g;
+    g.x  = a0.x  * x0.x  + h.x  * x0.y;
+    g.yz = a0.yz * x12.xz + h.yz * x12.yw;
+    return 130.0 * dot(m, g);
+}
+/*
+	// discontinuous pseudorandom uniformly distributed in [-0.5, +0.5]^3
+	vec3 random3(vec3 c) {
+		float j = 4096.0*sin(dot(c,vec3(17.0, 59.4, 15.0)));
+		vec3 r;
+		r.z = fract(512.0*j);
+		j *= .125;
+		r.x = fract(512.0*j);
+		j *= .125;
+		r.y = fract(512.0*j);
+		return r-0.5;
+	}
+	const float F3 =  0.3333333;
+	const float G3 =  0.1666667;
+	float snoise(vec3 p) {
+		vec3 s = floor(p + dot(p, vec3(F3)));
+		vec3 x = p - s + dot(s, vec3(G3));
+		vec3 e = step(vec3(0.0), x - x.yzx);
+		vec3 i1 = e*(1.0 - e.zxy);
+		vec3 i2 = 1.0 - e.zxy*(1.0 - e);
+		vec3 x1 = x - i1 + G3;
+		vec3 x2 = x - i2 + 2.0*G3;
+		vec3 x3 = x - 1.0 + 3.0*G3;
+		vec4 w, d;
+		w.x = dot(x, x);
+		w.y = dot(x1, x1);
+		w.z = dot(x2, x2);
+		w.w = dot(x3, x3);
+		w = max(0.6 - w, 0.0);
+		d.x = dot(random3(s), x);
+		d.y = dot(random3(s + i1), x1);
+		d.z = dot(random3(s + i2), x2);
+		d.w = dot(random3(s + 1.0), x3);
+		w *= w;
+		w *= w;
+		d *= w;
+		return dot(d, vec4(52.0));
+	}
+*/
+/*
+// value noise, and its analytical derivatives
+vec3 noised(in vec2 x) {
+    vec2 f = fract(x);
+    vec2 u = f*f*(3.0-2.0*f);
+#if 1
+    // texel fetch version
+    ivec2 p = ivec2(floor(x));
+    float a = texelFetch( iChannel0, (p+ivec2(0,0))&255, 0 ).x;
+	float b = texelFetch( iChannel0, (p+ivec2(1,0))&255, 0 ).x;
+	float c = texelFetch( iChannel0, (p+ivec2(0,1))&255, 0 ).x;
+	float d = texelFetch( iChannel0, (p+ivec2(1,1))&255, 0 ).x;
+#else    
+    // texture version    
+    vec2 p = floor(x);
+	float a = textureLod( iChannel0, (p+vec2(0.5,0.5))/256.0, 0.0 ).x;
+	float b = textureLod( iChannel0, (p+vec2(1.5,0.5))/256.0, 0.0 ).x;
+	float c = textureLod( iChannel0, (p+vec2(0.5,1.5))/256.0, 0.0 ).x;
+	float d = textureLod( iChannel0, (p+vec2(1.5,1.5))/256.0, 0.0 ).x;
+#endif   
+	return vec3(a+(b-a)*u.x+(c-a)*u.y+(a-b-c+d)*u.x*u.y, 6.0*f*(1.0-f)*(vec2(b-a,c-a)+(a-b-c+d)*u.yx));
+}
+const mat2 m2 = mat2(0.8, -0.6, 0.6, 0.8);
+float terrainM(in vec2 x) {
+	vec2  p = x * 0.003 / SC;
+    float a = 0.0;
+    float b = 1.0;
+	vec2  d = vec2(0.0);
+    for(int i = 0; i < 9; i++) {
+        vec3 n = noised(p);
+        d += n.yz;
+        a += b * n.x / (1.0 + dot(d, d));
+		b *= 0.5;
+        p = m2 * p * 2.0;
+    }
+	return SC * 120.0 * a;
+}
+*/
+/*
+float noise(vec3 x) {
+    vec3 p = floor(x);
+    vec3 f = fract(x);
+    f = f*f*(3.-2.*f);
+    float n = p.x + p.y*157. + 113.*p.z;   
+    vec4 v1 = fract(753.5453123*sin(n + vec4(0., 1., 157., 158.)));
+    vec4 v2 = fract(753.5453123*sin(n + vec4(113., 114., 270., 271.)));
+    vec4 v3 = mix(v1, v2, f.z);
+    vec2 v4 = mix(v3.xy, v3.zw, f.y);
+    return mix(v4.x, v4.y, f.x);
+}
+*/
+float hash(float n) {
+	return fract(sin(n) * 43758.5453);
+}
+float noise(in vec3 p) {
+	vec3 f = floor(p);
+	vec3 r = fract(p);
+	r = r * r * (3.0 - 2.0 * r);
+	float n = f.x + f.y * 57.0 + 113.0 * f.z;
+	float res = mix(mix(mix(hash(n + 0.0),   hash(n + 1.0), r.x),
+						mix(hash(n + 57.0),  hash(n + 58.0), r.x), r.y),
+					mix(mix(hash(n + 113.0), hash(n + 114.0), r.x),
+						mix(hash(n + 170.0), hash(n + 171.0), r.x), r.y), r.z);
+	return res;
+}
+float fbm(vec3 p) {
+	mat3 m = mat3(
+		 0.00,  0.80,  0.60,
+		-0.80,  0.36, -0.48,
+		-0.60, -0.48,  0.64
+	);
+	float f;
+	f  = 0.5000 * noise(p); p = m * p * 2.02;
+	f += 0.2500 * noise(p); p = m * p * 2.03;
+	f += 0.1250 * noise(p); //p = m * p * 2.01;
+	//f += 0.0625 * noise(p);
+	return f;
+}
 // GEOMETRIES
 // Sphere - signed - exact
 float sphere(vec3 p, float s) {
@@ -258,19 +465,6 @@ float ellipsoid(in vec3 p, in vec3 r) {
     return (length( p/r ) - 1.0) * min(min(r.x,r.y),r.z);
 }
 
-// particles
-/*
-float particles (vec3 p) {
-	vec3 pos = p;
-	pos.y -= iGlobalTime*0.02;
-	float n = fbm(20.0*pos);
-	n = pow(n, 5.0);
-	float brightness = noise(10.3*p);
-	float threshold = 0.26;
-	return smoothstep(threshold, threshold + 0.15, n)*brightness*90.0;
-}
-*/
-
 // boolean operation
 float bIntersect(float da, float db) {
     return max(da, db);
@@ -287,77 +481,17 @@ float twistedCube(vec3 p) {
     return box(q, vec3(0.2));
 }
 
-// NOISE
-vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
-vec2 mod289(vec2 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
-vec3 permute(vec3 x) { return mod289(((x * 34.0) + 1.0) * x); }
-// simplex noise
-float snoise(vec2 v) {
-    const vec4 C = vec4(
-		 0.211324865405187,  	// (3.0-sqrt(3.0))/6.0
-		 0.366025403784439,  	// 0.5*(sqrt(3.0)-1.0)
-		-0.577350269189626,  	// -1.0 + 2.0 * C.x
-		 0.024390243902439 		// 1.0 / 41.0
-	);
-    vec2 i  = floor(v + dot(v, C.yy));
-    vec2 x0 = v -   i + dot(i, C.xx);
-    vec2 i1;
-    i1 = (x0.x > x0.y) ? vec2(1.0, 0.0) : vec2(0.0, 1.0);
-    vec4 x12 = x0.xyxy + C.xxzz;
-    x12.xy -= i1;
-    i = mod289(i); // Avoid truncation effects in permutation
-    vec3 p = permute(permute(i.y + vec3(0.0, i1.y, 1.0 )) + i.x + vec3(0.0, i1.x, 1.0));
-    vec3 m = max(0.5 - vec3(dot(x0, x0), dot(x12.xy, x12.xy), dot(x12.zw, x12.zw)), 0.0);
-    m = m * m;
-    m = m * m;
-    vec3 x = 2.0 * fract(p * C.www) - 1.0;
-    vec3 h = abs(x) - 0.5;
-    vec3 ox = floor(x + 0.5);
-    vec3 a0 = x - ox;
-    m *= 1.79284291400159 - 0.85373472095314 * (a0 * a0 + h * h);
-    vec3 g;
-    g.x  = a0.x  * x0.x  + h.x  * x0.y;
-    g.yz = a0.yz * x12.xz + h.yz * x12.yw;
-    return 130.0 * dot(m, g);
-}
-/* discontinuous pseudorandom uniformly distributed in [-0.5, +0.5]^3 */
-vec3 random3(vec3 c) {
-	float j = 4096.0*sin(dot(c,vec3(17.0, 59.4, 15.0)));
-	vec3 r;
-	r.z = fract(512.0*j);
-	j *= .125;
-	r.x = fract(512.0*j);
-	j *= .125;
-	r.y = fract(512.0*j);
-	return r-0.5;
+// particles
+float particles (vec3 p) {
+	vec3 pos = p;
+	pos.y -= u_time * 0.02;
+	float n = fbm(20.0 * pos);
+	n = pow(n, 5.0);
+	float brightness = noise(10.3 * p);
+	float threshold = 0.26;
+	return smoothstep(threshold, threshold + 0.15, n) * brightness * 90.0;
 }
 
-const float F3 =  0.3333333;
-const float G3 =  0.1666667;
-float snoise(vec3 p) {
-	vec3 s = floor(p + dot(p, vec3(F3)));
-	vec3 x = p - s + dot(s, vec3(G3));
-	vec3 e = step(vec3(0.0), x - x.yzx);
-	vec3 i1 = e*(1.0 - e.zxy);
-	vec3 i2 = 1.0 - e.zxy*(1.0 - e);
-	vec3 x1 = x - i1 + G3;
-	vec3 x2 = x - i2 + 2.0*G3;
-	vec3 x3 = x - 1.0 + 3.0*G3;
-	vec4 w, d;
-	w.x = dot(x, x);
-	w.y = dot(x1, x1);
-	w.z = dot(x2, x2);
-	w.w = dot(x3, x3);
-	w = max(0.6 - w, 0.0);
-	d.x = dot(random3(s), x);
-	d.y = dot(random3(s + i1), x1);
-	d.z = dot(random3(s + i2), x2);
-	d.w = dot(random3(s + 1.0), x3);
-	w *= w;
-	w *= w;
-	d *= w;
-	return dot(d, vec4(52.0));
-}
 //
 /*
 vec3 estimateNormal(vec3 p) {
@@ -400,107 +534,49 @@ float opRep(vec3 p, vec3 c) {
 	// return sphere(q, 0.05 + 0.03 * cos(u_time * 3.0 + q.y * 90.0 + q.x * 30.0));
 }
 
-// MATERIALS
-struct Material {
-	vec3 color;
-	float ambient; // The object's ambient property. You can also have a global and light ambient property, but we'll try to keep things simple.	
-	float glossiness;
-	float shininess;
-};
-Material getMaterial(int m) {
-	Material material;
-	if (m == 1) {
-		material = Material(
-			vec3(0.0, 0.0, 1.0), // color
-			0.3, // ambient,
-			0.6, // glossiness
-			1.9 // shininess
-		);
-	} else if (m == 2) {
-		material = Material(
-			vec3(1.0, 1.0, 1.0), // color
-			0.4, // ambient,
-			0.8, // glossiness
-			0.9 // shininess
-		);
-	} else if (m == 3) {
-		material = Material(
-			vec3(0.0, 1.0, 0.0), // color
-			0.3, // ambient,
-			0.6, // glossiness
-			1.9 // shininess
-		);
-	} else if (m == 4) {
-		material = Material(
-			vec3(1.0, 1.0, 0.0), // color
-			0.9, // ambient,
-			0.6, // glossiness
-			1.9 // shininess
-		);
-	} else if (m == 5) {
-		material = Material(
-			vec3(1.0, 1.0, 0.0), // color
-			0.5, // ambient,
-			0.8, // glossiness
-			0.3 // shininess
-		);
-	}
-	return material;
+// blend smooth min
+#define S_TYPE 1
+#if S_TYPE == 1
+// exponential smooth min (k = 32);
+float smin(float a, float b, float k) {
+    float res = exp(-k * a) + exp(-k * b);
+    return -log(res) / k;
+}
+#elif S_TYPE == 2
+// polynomial smooth min (k = 0.1);
+float smin(float a, float b, float k) {
+    float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
+    return mix(b, a, h) - k * h * (1.0 - h);
+}
+#else
+// power smooth min (k = 8);
+float smin(float a, float b, float k) {
+    a = pow(a, k); b = pow(b, k);
+    return pow((a * b) / (a + b), 1.0 / k);
+}
+#endif
+// displacement
+float displacement(vec3 p) {
+	return sin(8.0 * cos(u_time) * p.x) * sin(2.0 * sin(u_time * .4) * p.y) * sin(2.0 * cos(u_time) * p.z);
+}
+float opDisplace(vec3 p) {
+    float d1 = sphere(p, .5);
+    float d2 = displacement(p);
+    return d1 + d2;
+}
+// twist
+float opTwist(vec3 p) {
+    float c = cos((2.0 + 12.0 * cos(u_time * .3)) * p.y);
+    float s = sin((2.0 + 12.0 * cos(u_time * .3)) * p.y);
+    mat2  m = mat2(c, -s, s, c);
+    vec3  q = vec3(m * p.xz, p.y);
+    return torus(q, vec2(0.6, 0.2));
 }
 
 // ###############
 // ###  SCENE  ###
 // ###############
 #define SC (250.0)
-// value noise, and its analytical derivatives
-/*
-vec3 noised(in vec2 x) {
-    vec2 f = fract(x);
-    vec2 u = f*f*(3.0-2.0*f);
-#if 1
-    // texel fetch version
-    ivec2 p = ivec2(floor(x));
-    float a = texelFetch( iChannel0, (p+ivec2(0,0))&255, 0 ).x;
-	float b = texelFetch( iChannel0, (p+ivec2(1,0))&255, 0 ).x;
-	float c = texelFetch( iChannel0, (p+ivec2(0,1))&255, 0 ).x;
-	float d = texelFetch( iChannel0, (p+ivec2(1,1))&255, 0 ).x;
-#else    
-    // texture version    
-    vec2 p = floor(x);
-	float a = textureLod( iChannel0, (p+vec2(0.5,0.5))/256.0, 0.0 ).x;
-	float b = textureLod( iChannel0, (p+vec2(1.5,0.5))/256.0, 0.0 ).x;
-	float c = textureLod( iChannel0, (p+vec2(0.5,1.5))/256.0, 0.0 ).x;
-	float d = textureLod( iChannel0, (p+vec2(1.5,1.5))/256.0, 0.0 ).x;
-#endif   
-	return vec3(a+(b-a)*u.x+(c-a)*u.y+(a-b-c+d)*u.x*u.y, 6.0*f*(1.0-f)*(vec2(b-a,c-a)+(a-b-c+d)*u.yx));
-}
-const mat2 m2 = mat2(0.8, -0.6, 0.6, 0.8);
-float terrainM(in vec2 x) {
-	vec2  p = x * 0.003 / SC;
-    float a = 0.0;
-    float b = 1.0;
-	vec2  d = vec2(0.0);
-    for(int i = 0; i < 9; i++) {
-        vec3 n = noised(p);
-        d += n.yz;
-        a += b * n.x / (1.0 + dot(d, d));
-		b *= 0.5;
-        p = m2 * p * 2.0;
-    }
-	return SC * 120.0 * a;
-}
-*/
-float noise(vec3 x) {
-    vec3 p = floor(x);
-    vec3 f = fract(x);
-    f = f*f*(3.-2.*f);
-    float n = p.x + p.y*157. + 113.*p.z;   
-    vec4 v1 = fract(753.5453123*sin(n + vec4(0., 1., 157., 158.)));
-    vec4 v2 = fract(753.5453123*sin(n + vec4(113., 114., 270., 271.)));
-    vec4 v3 = mix(v1, v2, f.z);
-    vec2 v4 = mix(v3.xy, v3.zw, f.y);
-    return mix(v4.x, v4.y, f.x);
-}
 
 float rocky(vec3 p) {
 	// random rotation reduces artifacts
@@ -524,9 +600,10 @@ float rocky(vec3 p) {
 	return rocky * 0.3; // (0.2 + 0.3 * abs(cos(u_time * 0.5)));
 }
 float getRock(vec3 p) {
-	float d = sphere(p, 0.7);
-	// float d = plane(p, vec4(1.0, 0.0, 0.0, 1.0));
-	return d + (d < 0.01 ? rocky(p) * 1.0 : 0.0);
+	vec3 r = rotatePoint(p);
+	float d = sphere(r, 0.7);
+	// float d = plane(r, vec4(1.0, 0.0, 0.0, 1.0));
+	return d + (d < 0.01 ? rocky(r) * 1.0 : 0.0);
 }
 float terrain(vec3 p, vec4 n) {
 	// n must be normalized
@@ -540,15 +617,14 @@ float getTorus(vec3 p) {
 	p = rotatePoint(p);
 	return torus(p, vec2(0.5, 0.02));
 }
-float getClouds(vec3 p) {
+float getCloud(vec3 p) {
 	/*
 	return p.y - terrainM(p.xz);
 	float w = 	snoise((p.xy + u_time * 0.123) * 2.345) * 
 				snoise((p.yz + u_time * 0.234) * 1.234) + 3.0;
 	*/
-	// float w = sinusoidBumps(p * .2) * .5 + .5;
-	vec3 q = rotatePoint(p);
-	return getRock(q);
+	float w = sinusoidBumps(p * .2) * .5 + .5;
+	return w;
 	/*
 	float x = fract(p.x * 3.1234);
 	float y = fract(p.y * 6.1234);
@@ -576,39 +652,63 @@ float getCube(vec3 p) {
 float getPlane(vec3 p) {
 	return plane(p, vec4(0.0, 1.0, 0.0, 2.0));
 }
-int materialId = 1;
+float getMetaballs(vec3 p) {
+	float a = sphere(p + vec3(0.5 * cos(u_time * 3.), 0.0, 0.5 * sin(u_time * 2.)), .3);
+    float b = sphere(p + vec3(0.5 * sin(u_time * 5.), 0.0, 0.5 * cos(u_time * 3.)), .3);
+    float c = sphere(p + vec3(0.1, 0.5 * sin(u_time * 5.), 0.2 * cos(u_time * 3.)), .3);
+    float d = smin(a, b, 16.0);
+	d = smin(c, d, 8.0);
+	return d + (d < 0.01 ? rocky(p) * 1.0 : 0.0);
+}
+float getDisp(vec3 p) {
+	return opDisplace(p);
+}
+int materialId = 6;
 float scene(vec3 p) {
-	float 	a = 1000000.0,
-			// a = getSpheres(p),
-			// b = getClouds(p),
-			b = 1000000.0,
-			// c = 1000000.0,
-			c = getTorus(p),
-			// d = 1000000.0,
-			d = getCube(p),
-			e = getPlane(p);
+	float 	 z = 1000000.0
+			,a = getPlane(p)
+			,b = z // getRock(p)
+			,c = z // getTorus(p)
+			,d = z // getCube(p)
+			,e = z // getSpheres(p)
+			,f = z // getDisp(p)
+			,g = z // opTwist(p)
+			,h = getMetaballs(p)
+			,w = z;
+	// g = g + (g < 0.01 ? rocky(p) * 1.0 : 0.0);
 	if (b < a) {
 		a = b;
-		materialId = 2;
+		materialId = 6;
 	}
 	if (c < a) {
 		a = c;
-		materialId = 3;
+		materialId = 6;
 	}
 	if (d < a) {
 		a = d;
-		materialId = 4;
+		materialId = 6;
 	}
 	if (e < a) {
 		a = e;
 		materialId = 5;
+	}
+	if (f < a) {
+		a = f;
+		materialId = 5;
+	}
+	if (g < a) {
+		a = g;
+		materialId = 5;
+	}
+	if (h < a) {
+		a = h;
+		materialId = 6;
 	}
 	return a;
 }
 // ###############
 // ###  SCENE  ###
 // ###############
-
 
 // A clever way to obtain the surface normal without the need to perform difficult, and often expensive, differential calculations, etc.
 // Use the surface point (p) and epsilon value (eps) to obtain the gradient along each of the individual axes (f(p.x+eps)-f(p.x-eps), etc).
@@ -719,29 +819,6 @@ Surface getSurface(Marcher marcher) {
 }
 
 // LIGHT
-struct Light {
-	vec3 color;
-	vec3 position;
-	vec3 direction;
-	vec3 reflected;
-	float distance;
-	float attenuation;
-	float diffuse;
-	float specular;
-	float occlusion;
-};
-/*
-float __getOcclusion(vec3 p, vec3 n) {
-    float step = 8.0;
-    float ao = 0.0;
-    float dist;
-    for (int i = 1; i <= 3; i++) {
-        dist = step * float(i);
-		ao += max(0.0, (dist - scene(p + n * dist).y) / dist);  
-    }
-    return 1.0 - ao * 0.1;
-}
-*/
 const int OSTEPS = 4;
 float getOcclusion(vec3 p, vec3 d) {
 	float occ = 1.0;
@@ -753,7 +830,6 @@ float getOcclusion(vec3 p, vec3 d) {
 	}
 	return max(0.0, occ);
 }
-
 float getSoftShadow(in vec3 ro, in vec3 rd, float mint, float k, in vec4 c ) {
     return 1.0;
 	/*
@@ -769,7 +845,17 @@ float getSoftShadow(in vec3 ro, in vec3 rd, float mint, float k, in vec4 c ) {
     return clamp(res,0.0,1.0);
 	*/
 }
-
+struct Light {
+	vec3 color;
+	vec3 position;
+	vec3 direction;
+	vec3 reflected;
+	float distance;
+	float attenuation;
+	float diffuse;
+	float specular;
+	float occlusion;
+};
 Light getLight(vec3 color, vec3 position, Material material, Surface surface, Camera camera) {
 	// Light needs to have a position, a direction and a color. Obviously, it should be positioned away from the
 	// object's surface. The direction vector is the normalized vector running from the light position to the object's surface point that we're
@@ -847,8 +933,7 @@ vec3 calcLight (Light light, Material material) {
 		return (material.color * (material.ambient * light.occlusion + light.diffuse * material.glossiness) + light.specular * material.shininess) * light.color * light.attenuation;
 	}
 }
-
-const int STEPS = 64; // 128	
+const int STEPS = 96; // 128	
 float getRayDistance(Marcher marcher, Camera camera) {
 	marcher.distance = 0.0;
 	marcher.depth = camera.near; // Ray depth. "start" is usually zero, but for various reasons, you may wish to start the ray further away from the origin.
@@ -888,10 +973,9 @@ float getRayDistance(Marcher marcher, Camera camera) {
 	// Either way, return the maximum distance, which is usually the far-clipping-plane, and be done with it.
 	return marcher.depth;
 }
-
 vec3 render() {
 	// BACKGROUND
-	vec3 background = vec3(0.01, 0.01, 0.01);
+	vec3 background = vec3(.01, .01, .01);
 	// CAMERA
 	Camera camera = getCamera(
 		vec3(4.0, 1.0, 4.0), // vec3(4.0 * sin(u_time), 1.0, 4.0 * cos(u_time)), // position
@@ -916,9 +1000,9 @@ vec3 render() {
 	}
 	// LIGHT
 	Light light = getLight(
-		vec3(1.0, 1.0, 1.0), // color
-		// vec3(1.0), 
-		vec3(1.5 * sin(u_time * 0.5), 0.75 + 0.25 * cos(u_time * 0.5), -1.0), // position
+		vec3(0.9, 0.9, 0.9), // color
+		// vec3(cos(u_time * 1.5) * 1.5, 0.5, sin(u_time * 1.5) * 1.5), // position
+		vec3(0.6, 0.5, 1.5), // position
 		material,
 		surface,
 		camera
@@ -930,11 +1014,12 @@ vec3 render() {
 	// 	surface.rgb = vec3(0.1);
 	// }
 	// FOG
-	surface.rgb = mix(surface.rgb, background, clamp(marcher.distance / 20.0, 0.0, 1.0));
+	if (false) {
+		surface.rgb = mix(surface.rgb, background, clamp(marcher.distance / 20.0, 0.0, 1.0));
+	}
 	// Clamping the lit pixel between black and while, then putting it on the screen. We're done. Hooray!
 	return clamp(surface.rgb, 0.0, 1.0); // from 0 to 1
 }
-
 void main() {
 	setVars();
 
