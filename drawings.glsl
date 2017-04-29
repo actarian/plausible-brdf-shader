@@ -658,6 +658,7 @@ float getMetaballs(vec3 p) {
     float c = sphere(p + vec3(0.1, 0.5 * sin(u_time * 5.), 0.2 * cos(u_time * 3.)), .3);
     float d = smin(a, b, 16.0);
 	d = smin(c, d, 8.0);
+	// return d;
 	return d + (d < 0.01 ? rocky(p) * 1.0 : 0.0);
 }
 float getDisp(vec3 p) {
